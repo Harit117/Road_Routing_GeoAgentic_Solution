@@ -1,0 +1,8 @@
+geopandas
+osmnx
+pyogrio
+pandas
+shapely
+matplotlib
+folium
+requests

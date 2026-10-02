@@ -1,0 +1,193 @@
+flood_point_id,depth_inches,zone,ward,remarks,depth_cm,latitude,longitude
+40,7.0,,,completely  inundated  with flood water,17.78,12.9989055,80.207447
+41,6.5,,,partially flooded,16.51,12.99926,80.2075221
+42,6.0,,,partially flooded,15.24,13.0025457,80.2087814
+43,6.5,,,partially flooded,16.51,12.9999502,80.207727
+44,6.5,,,partially  inundated one side of the road,16.51,12.9783961,80.2041982
+45,5.5,,,partially flooded one side of the road,13.97,12.973235,80.2107428
+47,7.0,,,partially inundated on sides of the road,17.78,12.9613758,80.2151748
+48,6.5,,,partially inundated on the side of the road,16.51,12.9573618,80.2135598
+49,6.0,,,partially inundated on the road,15.24,12.9725609,80.2194656
+50,6.0,,,partially inundated on the road,15.24,12.9727053,80.2195052
+51,6.0,,,partially inundated on the road,15.24,12.973793,80.2186606
+52,6.5,,,partially inundated on the road,16.51,12.9754798,80.2207229
+53,6.0,,,partially inundated on the road side,15.24,12.9755569,80.2207685
+54,6.0,,,partially inundated on the road near bus stand,15.24,12.9761094,80.2211896
+55,5.5,,,partially flooded on the road,13.97,12.9761728,80.2212664
+56,6.0,,,partially inundated on sides of the road,15.24,12.9762257,80.2212299
+57,6.0,,,partially inundated on the road side,15.24,12.9775316,80.2212393
+58,6.0,,,partially flooded,15.24,12.9774976,80.2212594
+59,6.0,,,partially flooded on the road side,15.24,12.978268,80.2212108
+60,6.0,,,partially inundated on the road side,15.24,12.9786532,80.2212004
+61,6.0,,,flood inundated on the road,15.24,12.9799613,80.2210679
+62,9.0,,,flood inundated on the road near tneb office,22.86,12.9802998,80.2210082
+63,8.0,,,partially flooded,20.32,12.9808337,80.2209667
+64,9.0,,,partially flooded on the road,22.86,12.9809493,80.2210103
+65,9.5,,,partially flooded,24.13,12.9810264,80.2210542
+66,7.5,,,partially flooded,19.05,12.9811332,80.2210827
+67,6.0,,,partially flooded,15.24,12.9743847,80.2204192
+68,5.5,,,partially flooded on the road near bus stop,13.97,12.9636665,80.2154524
+69,5.5,,,partially flooded on the road side,13.97,12.9637452,80.2151738
+70,6.5,,,completely flooded  on the road junction,16.51,12.9646794,80.1961197
+71,5.5,,,partially flooded on the road side,13.97,12.9646415,80.1959859
+72,17.0,,,food water completely  inundate and cause road block sometimes,43.18,12.9646467,80.1959135
+73,5.7,,,partially flooded on the road side,14.48,12.9651521,80.1923354
+74,5.5,,,partially flooded on the road side,13.97,12.9652191,80.1920873
+86,7.0,,,partially  covered  one side of the road,17.78,12.9967772,80.2491892
+87,6.0,,,partially flooded covering one side of the road,15.24,12.9967043,80.2492073
+88,7.0,,,partially  flooded  covering  flyover  entry,17.78,13.0068879,80.2401093
+89,29.0,,,completely flooded  and drain within 2 hours,73.66,12.9796666,80.2432156
+90,17.0,,,completely flooded bocking railway  station exit upto 1 feet,43.18,12.9783275,80.2389006
+91,10.5,,,completely flooded,26.67,12.9782033,80.2397274
+92,6.0,,,completely flooded upto 12,15.24,12.97802,80.2410806
+93,5.0,,,completely flooded upto10,12.7,12.9780782,80.2414282
+94,6.0,,,completely flooded bocking railway station entrance  upto 2 feet,15.24,12.9782056,80.2418735
+95,7.0,,,completely inundated,17.78,12.9784039,80.2425192
+96,7.0,,,completely flooded bocking railway station entrance  upto 1 feet,17.78,12.9785379,80.2430483
+97,20.0,,,completely flooded  upto 1.5 feet reported drain in 2 hours,50.8,12.9783892,80.2431747
+98,20.0,,,completely flooded  reported,50.8,12.978811,80.2431378
+99,16.0,,,railway station covered by flood upto 1 feet,40.64,12.9783595,80.240986
+100,9.0,,,completely flooded upto  1 feet and drain in 2 hours,22.86,12.975108,80.2440625
+101,5.0,,,completely flooded upto 1 feet,12.7,12.9748591,80.2441453
+102,7.0,,,completely flooded,17.78,12.9746405,80.2442016
+103,6.0,,,flood water inundated  into road juction,15.24,12.9357513,80.2339036
+104,6.5,,,inundated  into road  covering junction,16.51,12.9139844,80.2293566
+119,6.0,,,partially inundated on the junction,15.24,12.9114318,80.1958475
+120,6.0,,,partially inundated,15.24,12.911374,80.1959021
+24,6.0,,,one side of the road got partially  flood,15.24,12.9270726,80.1977609
+25,6.0,,,connecting road junction got flooded,15.24,12.9277399,80.1982122
+26,8.5,,,main road got partially  flooded and connection got afffected,21.59,12.9358912,80.2043262
+27,6.0,,,partially  flooded  covering  half of the road on both side,15.24,12.9404894,80.2057156
+28,6.5,,,both side of the road got flooded,16.51,12.9412204,80.2059932
+29,6.5,,,service road joining main road  got partially  flooded,16.51,12.9512903,80.2109858
+30,6.0,,,partially flooded,15.24,12.9733166,80.219695
+31,6.5,,,partially flooded,16.51,12.9761463,80.2198958
+32,7.0,,,road got completely  flooed,17.78,12.976312,80.2193074
+33,8.0,,,partially  side of the road got flooded,20.32,12.9779942,80.2190999
+34,29.0,,,completely  flooded,73.66,12.9974263,80.2161726
+35,6.0,,,partially  flooded  covering  one side  of the road,15.24,13.0067024,80.2126642
+36,15.0,,,flood water completely  get inundated  into the road,38.1,13.0098038,80.2150226
+37,7.0,,,flood water inundate upto 2feet in subway,17.78,12.9955825,80.2011622
+38,9.5,,,partially flooded covering half road,24.13,12.9971826,80.2070906
+39,7.5,,,partially flooded,19.05,12.9974096,80.2071278
+190,60.0,,,completely inundated covering entirely- traffic inspector record,152.4,12.9487149,80.2018432
+191,40.0,,,completely inundated covering entirely,101.6,12.9487165,80.2029167
+192,15.0,,,completely inundated  covering entirely,38.1,12.9487613,80.2035273
+193,14.0,,,completely inundated,35.56,12.9725528,80.1914282
+194,35.0,,,completely inundated subway blocked,88.9,12.9853013,80.17684
+195,35.0,,,completely inundated subways blocked,88.9,12.989225,80.185412
+196,14.0,,,completely inundated,35.56,12.9768687,80.1935022
+197,5.0,,,,12.7,12.9777083,80.193806
+198,15.0,,,completely inundated,38.1,12.9794984,80.1946036
+199,11.0,,,completely inundated,27.94,12.9809297,80.1952644
+200,10.0,,,completely inundated,25.4,12.9819961,80.1958994
+201,15.0,,,completely inundated and drain in 4 hours,38.1,12.9593422,80.2445919
+202,13.0,,,completely inundated,33.02,12.959023,80.2444786
+203,10.0,,,completely inundated,25.4,12.9587563,80.2443425
+204,13.0,,,completely inundated,33.02,12.9623321,80.2459743
+205,7.0,,,completely inundated blocking connection road,17.78,13.0332651,80.2096652
+206,7.8,,,partially inundated,19.81,13.0333788,80.2097054
+207,7.0,,,partially inundated,17.78,13.0334791,80.2097235
+208,7.5,,,partially inundated,19.05,13.0331475,80.2096763
+209,21.0,,,completely inundated  blocking road,53.34,13.0352494,80.2097785
+210,15.0,,,completely inundated  blocking road reported,38.1,13.0350907,80.2099277
+211,13.0,,,completely inundated,33.02,13.0366657,80.2122435
+212,11.0,,,completely inundated,27.94,13.0368261,80.2122515
+213,13.0,,,completely inundated covering entirely junction,33.02,13.0368908,80.2122384
+214,11.0,,,partially inundated covering one lane,27.94,13.0370623,80.2122555
+215,11.0,,,partially inundated covering one lane,27.94,13.0373768,80.2122592
+216,11.0,,,partially inundated covering one lane,27.94,13.0376545,80.2122545
+217,15.0,,,completely inundated,38.1,13.0369042,80.2120752
+218,11.0,,,completely inundated,27.94,13.0355496,80.2069562
+219,11.0,,,completely inundated,27.94,13.0356316,80.205898
+220,14.0,,,completely inundated,35.56,13.0360726,80.2027478
+221,15.0,,,completely inundated,38.1,13.036634,80.1996864
+222,14.0,,,completely inundated,35.56,13.0372798,80.1952989
+223,16.0,,,completely inundated,40.64,13.0372981,80.2045636
+224,16.0,,,completely inundated,40.64,13.0404935,80.2051007
+225,5.0,,,tree fall,12.7,13.0385132,80.2084877
+226,8.5,,,completely inundated,21.59,13.0404426,80.2087331
+227,10.0,,,completely inundated,25.4,13.0413464,80.2088461
+228,15.0,,,completely inundated,38.1,13.0418771,80.2089651
+229,11.0,,,completely inundated,27.94,13.043134,80.2091093
+230,8.0,,,completely inundated,20.32,13.0377933,80.2131826
+231,9.0,,,completely inundated,22.86,13.0384188,80.2136845
+232,9.0,,,completely inundated,22.86,13.0390697,80.2141287
+233,9.0,,,completely inundated covering  junction,22.86,13.0393931,80.2141814
+234,9.0,,,completely inundated,22.86,13.0398795,80.2146709
+235,9.0,,,completely inundated  raised upto 10,22.86,13.0405298,80.2151128
+236,8.0,,,completely inundated,20.32,13.0433731,80.2198281
+237,11.0,,,completely inundated,27.94,13.0430429,80.2214934
+238,11.0,,,completely inundated,27.94,13.0420489,80.2254017
+239,11.0,,,completely inundated,27.94,13.0417974,80.2264203
+240,60.0,,,completely inundated  and subway closed,152.4,13.041265,80.2288312
+241,9.0,,,completely inundated junction,22.86,13.0422426,80.2249377
+242,11.0,,,completely inundated,27.94,13.0453113,80.2257886
+243,11.0,,,,27.94,13.0462056,80.2260793
+244,11.0,,,completely inundated,27.94,13.0466935,80.2262097
+245,11.0,,,completely inundated blocking junction,27.94,13.0467471,80.2260391
+246,13.0,,,completely inundated,33.02,13.0474379,80.2329686
+247,9.0,,,completely inundated,22.86,13.046916,80.2330048
+248,11.0,,,completely inundated,27.94,13.0435978,80.2324757
+249,11.0,,,completely inundated,27.94,13.0452884,80.2328532
+250,11.0,,,completely inundated,27.94,13.0484534,80.2332193
+251,5.0,,,,12.7,13.0500548,80.2334125
+252,12.0,,,completely inundated,30.48,13.0531155,80.2342553
+253,9.0,,,completely inundated under flyover upto 7,22.86,13.0452495,80.2400948
+254,11.0,,,,27.94,13.0449507,80.2402893
+255,8.0,,,completely inundated under flyover upto  8,20.32,13.0446368,80.2395711
+256,10.0,,,completely inundated,25.4,13.035077,80.230462
+257,8.0,,,completely inundated upto 10,20.32,13.0345103,80.2303997
+258,8.0,,,completely inundated upto 10,20.32,13.035109,80.2301133
+259,20.0,,,completely inundated upto 15inches,50.8,13.0369558,80.236042
+260,15.0,,,completely inundated upto 10 inch reported,38.1,13.0398788,80.2431848
+261,7.0,,,partially inundated,17.78,13.0535541,80.2358865
+262,7.0,,,partially inundated,17.78,13.0540689,80.2283666
+263,10.0,,,partially inundated reported upto 7,25.4,13.0537432,80.2257631
+264,9.0,,,completely inundated,22.86,13.0508249,80.2199863
+265,9.0,,,completely inundated,22.86,13.0474784,80.219008
+266,9.0,,,completely inundated,22.86,13.044058,80.2176458
+267,12.0,,,completely inundated covering entirely road,30.48,13.0518417,80.218557
+268,12.0,,,completely inundated covering entirely road,30.48,13.0509079,80.215795
+269,11.0,,,completely flooded bocking entire road,27.94,13.0501364,80.2136962
+3,7.0,,,road damage and water stagnant,17.78,13.1646096,80.2066212
+4,7.0,,,water stagnant and drainage water into the road,17.78,13.163277,80.2087744
+5,7.5,,,road damage,19.05,13.1621226,80.2087767
+6,7.5,,,road damage and water stagnant,19.05,13.1624664,80.208765
+7,9.0,,,road damage and water stagnant,22.86,13.1608164,80.2079063
+8,9.0,,,water stagnant,22.86,13.1528236,80.2087217
+9,11.0,,,water stagnant and road damage,27.94,13.1449155,80.223201
+10,13.0,,,water stagnant and drainage water into the road and road closed,33.02,13.1440562,80.2543578
+11,9.5,,,water stagnant,24.13,13.1447196,80.2544242
+12,11.0,,,water stagnant,27.94,13.1539213,80.2570136
+13,8.5,,,water stagnant,21.59,13.1539653,80.2574373
+14,7.5,,,,19.05,13.1560963,80.261058
+15,10.0,,,water stagnant,25.4,13.1531955,80.2575704
+16,11.0,,,water stagnant,27.94,13.1514733,80.257961
+17,11.0,,,water stagnant,27.94,13.148914,80.2581575
+18,15.0,,,water stagnant,38.1,13.1499924,80.2584462
+19,13.0,,,water stagnant,33.02,13.1308786,80.2007921
+20,10.0,,,water stagnant,25.4,13.1332569,80.1941523
+21,11.0,,,,27.94,13.1297273,80.1938234
+22,9.5,,,water stagnant,24.13,13.1453612,80.2189292
+23,11.0,,,water stagnant,27.94,13.1461869,80.2177802
+24,9.0,,,water stagnant,22.86,13.141982,80.1855481
+25,9.5,,,water stagnant,24.13,13.1406943,80.1861529
+26,11.0,,,water stagnant,27.94,13.1321301,80.1708952
+27,10.0,,,water stagnant and water from the park lake,25.4,13.1222138,80.1674375
+28,9.0,,,water stagnant and drainage water into the road,22.86,13.1195037,80.1685701
+29,8.0,,,water stagnant and damage roads,20.32,13.1173441,80.169028
+30,10.0,,,water stagnant,25.4,13.1233834,80.2015361
+29,5.0,,,Water stagnant,12.7,13.0154388,80.1890135
+30,5.0,,,Water flow,12.7,13.0159536,80.1816086
+110,8.0,,,water stagnant,20.32,13.100092,80.1676836
+111,5.0,,,,12.7,13.0996169,80.1708717
+112,10.0,,,water stagnant,25.4,13.0995692,80.1720482
+113,12.0,,,water stagnant,30.48,13.1019847,80.2148378
+114,8.0,,,water stagnant,20.32,13.1026208,80.2093732
+115,7.0,,,water stagnant,17.78,13.1056097,80.2092917
+116,8.0,,,water stagnant,20.32,13.1055695,80.21084
+117,9.0,,,water stagnant,22.86,13.1058529,80.2072753
+118,12.0,,,water stagnant,30.48,13.1053047,80.2071912
+119,12.0,,,water stagnant,30.48,13.1056005,80.2071365
+120,8.0,,,water stagnant,20.32,13.1141395,80.1985484
