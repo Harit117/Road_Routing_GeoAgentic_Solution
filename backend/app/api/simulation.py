@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -50,12 +50,27 @@ def _info(sim: Simulation) -> SimulationInfo:
 def build_simulation(request_app, body: CreateSimulation) -> Simulation:
     start = body.start_time or datetime.now().replace(minute=0, second=0, microsecond=0)
     try:
-        if body.preset is not None:
+        if body.scenario is not None:
+            steps = request_app.state.risk_engine.scenario_steps(body.scenario)
+            start = steps[0].time - timedelta(
+                hours=steps[0].duration_hours
+            )
+            rainfall = RainfallSeries(
+                [step.rainfall_mm / step.duration_hours for step in steps],
+                start,
+                f"historical_scenario:{body.scenario}",
+            )
+        elif body.preset is not None:
             rainfall = from_preset(body.preset, start)
         else:
             rainfall = from_values(body.rainfall_mm_per_h, start)
     except KeyError:
-        raise HTTPException(422, f"unknown preset; choose from {sorted(PRESETS)}")
+        raise HTTPException(
+            422,
+            "unknown rainfall preset or scenario; "
+            f"presets={sorted(PRESETS)}, "
+            "scenarios=['normal', 'moderate', 'heavy', 'extreme']",
+        )
     except ValueError as e:
         raise HTTPException(422, str(e))
     model_name = body.model or DEFAULT_MODEL

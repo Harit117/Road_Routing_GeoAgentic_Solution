@@ -79,16 +79,23 @@ def test_flood_risk_contract_for_routing(client):
     assert client.get("/api/health").json()["status"] == "ok"
 
     status = client.get("/api/flood-risk/model-status").json()
-    assert status["implementation_status"] == "placeholder"
+    assert status["implementation_status"] == "scenario_based_prototype"
     assert status["calibrated"] is False
+    assert status["historical_susceptibility_integrated"] is True
+    assert status["live_rainfall_available"] is False
 
     single = client.get(f"/api/flood-risk/roads/{road_id}")
     assert single.status_code == 200
     state = single.json()
     assert state["road_id"] == road_id
     assert state["status"] in {"safe", "watch", "risky", "flooded"}
-    assert 0 <= state["loading"]
-    assert state["source"] == "placeholder_simulation"
+    assert 0 <= state["loading"] <= 1
+    assert state["risk_score"] == state["loading"]
+    assert 0 <= state["susceptibility"] <= 1
+    assert state["threshold"] >= 0
+    assert state["risk_level"] in {"LOW", "MODERATE", "HIGH", "VERY_HIGH", "CRITICAL"}
+    assert state["source"].startswith("preset:")
+    assert "time_to_threshold_hours" in state
     assert client.get("/api/flood-risk/roads/not-a-road").status_code == 404
 
     batch = client.post(
@@ -99,10 +106,18 @@ def test_flood_risk_contract_for_routing(client):
     batch_body = batch.json()
     assert [item["road_id"] for item in batch_body["states"]] == [road_id]
     assert batch_body["unknown_road_ids"] == ["not-a-road"]
-    assert batch_body["model_status"] == "placeholder"
+    assert batch_body["model_status"] == "scenario_based_prototype"
+
+    scenario_batch = client.post(
+        "/api/flood-risk/roads:batch",
+        json={"road_ids": [road_id], "scenario": "normal"},
+    )
+    assert scenario_batch.status_code == 200
+    assert scenario_batch.json()["scenario"] == "normal"
+    assert scenario_batch.json()["states"][0]["source"] == "historical_scenario:normal"
 
 
-def test_scenario_simulation_is_isolated_and_explicitly_placeholder(client):
+def test_scenario_simulation_is_isolated_and_returns_model_state(client):
     before = client.get("/api/simulation").json()["tick"]
     response = client.post(
         "/api/flood-risk/simulate",
@@ -115,9 +130,26 @@ def test_scenario_simulation_is_isolated_and_explicitly_placeholder(client):
     assert response.status_code == 200
     body = response.json()
     assert body["scenario_name"] == "routing integration smoke scenario"
-    assert body["model_status"] == "placeholder"
-    assert body["model_name"] == "placeholder_bucket"
+    assert body["model_status"] == "scenario_based_prototype"
+    assert body["model_name"] == "normalized_susceptibility_bucket"
     assert body["started_at"].startswith("2026-10-03T12:00:00")
     assert body["states"]
     assert all("time_to_threshold_minutes" in item for item in body["states"])
+    assert all("time_to_threshold_hours" in item for item in body["states"])
     assert client.get("/api/simulation").json()["tick"] == before
+
+
+def test_historical_scenario_request_and_health_alias(client):
+    road_id = "osm_299880378_313444440_0"
+    response = client.post(
+        "/api/flood-risk/simulate",
+        json={"scenario": "heavy"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scenario_name"] == "heavy"
+    assert body["rainfall_source"] == "historical_scenario:heavy"
+    assert len(body["states"]) == 8616
+    assert road_id in {state["road_id"] for state in body["states"]}
+    assert client.get("/health").json()["status"] == "ok"
+    assert client.get("/api/health").json()["status"] == "ok"

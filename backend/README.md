@@ -1,8 +1,10 @@
 # Backend: flood simulation skeleton
 
 FastAPI service that loads the road network from `girlgeeks/data/processed`,
-runs a tick-by-tick rainfall simulation over every road, and serves a map
-viewer. Flood-model rules and routing are deliberately placeholders.
+runs rainfall simulations, and serves a map viewer. The routing-facing
+`/api/flood-risk` service now uses a scenario-based relative road-risk model;
+the general `/api/simulation` model registry and `/api/route` remain available
+for existing demos and integration work.
 
 ## Run
 
@@ -28,10 +30,10 @@ rainfall (mm/h per tick)  ──>  simulation/engine.py ──>  FloodModel.step
                                                        routing/ (stub: mission profiles only)
 ```
 
-**Loading** is the bucket fill level of a road: 0 = dry, 1 = flood threshold
-reached. It is relative, not a water depth. The engine records, for every
-road, the first tick it reached 1 (`onset_tick`): that ordering is what
-routing will consume.
+For flood-risk API responses, `current_flood_loading` and `threshold` are
+normalized model quantities, while `risk_score` is the clamped ratio of those
+quantities. The legacy `loading` field aliases `risk_score`, so 1.0 means the
+road-specific threshold was reached. None of these values is a water depth.
 
 Status bands (`simulation/engine.py`): safe < 0.5 ≤ watch < 0.8 ≤ risky < 1.0 ≤ flooded.
 
@@ -39,7 +41,7 @@ Status bands (`simulation/engine.py`): safe < 0.5 ≤ watch < 0.8 ≤ risky < 1.
 
 | Task | Where |
 | --- | --- |
-| Real flood model | Subclass `FloodModel` in `app/simulation/flood_models/`, register it in `flood_models/__init__.py`. Choose it with `"model": "<name>"` when creating a simulation. `placeholder_bucket.py` shows the contract. |
+| Road flood-risk model | `app/flood/` contains susceptibility, rainfall providers, normalized bucket dynamics, and risk progression. `app/simulation/flood_risk_service.py` adapts it to the established Member 3 API. |
 | Open-Meteo rainfall | Produce a `RainfallSeries` (`app/simulation/rainfall.py`); the hourly `precipitation` array maps 1:1 onto ticks. |
 | Routing (A\*) | `app/routing/`: `network.graph` is a `networkx.MultiDiGraph` whose edges carry `road_index`; look up `simulation.frames[t].loading[road_index]` for the current flood state. Implement `POST /api/route`. Mission profiles are in `routing/missions.py`. |
 | Whole of Chennai | Regenerate data with `girlgeeks/scripts/02_download_roads.py` for a Chennai bbox, saving files as `chennai_roads.geojson` / `chennai_road_nodes.geojson`, then run with `FLOOD_REGION=chennai`. |
@@ -59,22 +61,23 @@ Status bands (`simulation/engine.py`): safe < 0.5 ≤ watch < 0.8 ≤ risky < 1.
 | POST | `/api/simulation/step?n=1`, `/run`, `/reset` | Advance or rewind |
 | GET | `/api/simulation/frames/{tick}` | Loading of every road at a tick |
 | GET | `/api/simulation/onset` | Roads in the order they reached the flood threshold |
-| GET | `/api/health` | Service health |
-| GET | `/api/flood-risk/model-status` | Model implementation/calibration status for consumers |
-| GET | `/api/flood-risk/roads/{road_id}` | Latest active-simulation state for one road |
-| POST | `/api/flood-risk/roads:batch` | Latest active-simulation state for requested road IDs |
-| POST | `/api/flood-risk/simulate` | Run an isolated rainfall scenario and return per-road outputs |
+| GET | `/health`, `/api/health` | Service health |
+| GET | `/api/flood-risk/model-status` | Model status, prototype parameters, calibration/live-feed limitations |
+| GET | `/api/flood-risk/roads/{road_id}` | Active-input state; optional `?scenario=heavy` for historical forcing |
+| POST | `/api/flood-risk/roads:batch` | Active-input states, or selected scenario with `{"road_ids":[...],"scenario":"heavy"}` |
+| POST | `/api/flood-risk/simulate` | Isolated historical `scenario`, existing `preset`, or manual hourly rainfall input |
 | GET | `/api/missions` | Mission profiles (medical, rescue, evacuation) |
 | POST | `/api/route` | 501 until routing is implemented |
 
 ### Routing handoff: Flood & Risk Engineer (Member 2) → Routing Engineer (Member 3)
 
-The `/api/flood-risk` endpoints provide the routing integration contract. `loading`
-is a relative bucket value (`1.0` means the threshold was reached), `status` is one
-of `safe`, `watch`, `risky`, or `flooded`, and
-`time_to_threshold_minutes` is elapsed time from the scenario start (or `null` if
-the threshold was not reached during the run). These are placeholder-model outputs;
-check `/api/flood-risk/model-status` before treating them as calibrated predictions.
+The `/api/flood-risk` endpoints preserve the routing integration paths and core
+response fields while adding susceptibility, road-specific threshold, current
+normalized loading, clamped risk score/level, and threshold timing. `loading`
+continues as a routing-compatible alias for `risk_score`; legacy `status` values
+remain `safe`, `watch`, `risky`, or `flooded`. `time_to_threshold_minutes` is
+retained, and `time_to_threshold_hours` is also returned. Either timing field is
+null when the selected rainfall series did not reach the road threshold.
 
 Fetch selected current road states in one call:
 
@@ -94,43 +97,93 @@ Response shape:
       "road_id": "osm_299880378_313444440_0",
       "status": "safe",
       "loading": 0.0,
+      "susceptibility": 0.42,
+      "threshold": 0.58,
+      "current_flood_loading": 0.0,
+      "risk_score": 0.0,
+      "risk_level": "LOW",
+      "threshold_reached": false,
+      "elapsed_hours": 0.0,
+      "time_to_threshold_hours": null,
       "rainfall_mm_per_h": 0.0,
       "cumulative_rain_mm": 0.0,
       "observed_at": "2026-10-03T12:00:00",
       "time_to_threshold_minutes": null,
-      "source": "placeholder_simulation"
+      "source": "preset:intensifying_storm"
     }
   ],
   "unknown_road_ids": ["osm_299880378_313444440_1"],
   "observed_at": "2026-10-03T12:00:00",
-  "model_status": "placeholder"
+  "scenario": null,
+  "model_status": "scenario_based_prototype"
 }
 ```
 
-Run a what-if scenario without changing the active simulation used by the map or
-single-road/batch current-state endpoints:
+Run an isolated historical or caller-supplied scenario without changing the
+active simulation used by the map or current-state endpoints:
 
 ```http
 POST /api/flood-risk/simulate
 Content-Type: application/json
 
-{
-  "scenario_name": "heavy-rain",
-  "rainfall_mm_per_h": [5, 12, 25, 30, 18, 8],
-  "start_time": "2026-10-03T12:00:00Z"
-}
+{"scenario": "heavy"}
 ```
 
-Use `preset` instead of `rainfall_mm_per_h` to select a built-in series. The
-response includes `model_status`, `model_name`, scenario timing, and a `states`
-array with one final state per road. Each state includes the first threshold
-time observed during that scenario. A single-road lookup is available at
-`GET /api/flood-risk/roads/{road_id}`; unknown roads return 404. Batch requests
-report unknown IDs in `unknown_road_ids` while returning known roads normally.
+The response contains `model_status`, `model_name`, source and scenario timing,
+and one final road state per road. `scenario` accepts `normal`, `moderate`,
+`heavy`, or `extreme`. Existing `preset` and `rainfall_mm_per_h` request forms
+remain supported. Single-road lookup optionally accepts the same scenario as a
+query parameter. Batch requests can include a scenario and continue to report
+unknown IDs in `unknown_road_ids`.
 
-The schema is defined in `app/api/schemas.py`; the calculations are isolated in
-`app/simulation/flood_risk_service.py` so Member 2 can replace the placeholder
-adapter as the historical-susceptibility and calibrated bucket model is built.
+The schema is defined in `app/api/schemas.py`; calculations are isolated in
+`app/flood/` and the API adapter in `app/simulation/flood_risk_service.py`.
+
+## Scenario-based road flood risk
+
+The `RiskEngine` combines historical inundation evidence from
+`road_flood_point_links.csv` and hazard evidence from `road_hazard_links.csv`.
+Depth is normalized to the deepest linked depth in the loaded network; hazard
+rank is normalized to the OpenCity rank maximum. By default susceptibility is
+`0.60 * normalized_depth + 0.40 * normalized_hazard`, with either weight
+configurable. A road without a linked observation receives zero evidence for
+that component; no depth/category is invented.
+
+For susceptibility `S_i`, the normalized threshold is `B_i = B_MAX * (1-S_i)`.
+Each hourly rainfall amount is normalized by a configurable 40.2 mm reference,
+then multiplied by `BASE_FILL_RATE + SUSCEPTIBILITY_GAIN * S_i`. Defaults are
+`B_MAX=1`, base fill `0.20`, and susceptibility gain `0.80`. These are
+transparent prototype parameters, not physically calibrated runoff constants.
+The bucket is capped at `B_MAX`; risk is `min(1, F_i/B_i)`. A zero threshold is
+handled as immediately reached with a critical score, without division by zero.
+Risk labels are application labels, not official flood classifications.
+
+Parameters can be overridden with `FLOOD_RISK_B_MAX`,
+`FLOOD_RISK_BASE_FILL_RATE`, `FLOOD_RISK_SUSCEPTIBILITY_GAIN`,
+`FLOOD_RISK_RAINFALL_REFERENCE_MM`, `FLOOD_RISK_DEPTH_WEIGHT`,
+`FLOOD_RISK_HAZARD_WEIGHT`, `FLOOD_RISK_LOW_MAX`,
+`FLOOD_RISK_MODERATE_MAX`, and `FLOOD_RISK_HIGH_MAX`.
+
+The model estimates relative road risk and time-to-threshold under a selected
+rainfall forcing. It does not predict exact water depth or exact flood onset and
+does not implement physically calibrated hydrology. OpenCity historical flood
+observations describe spatial susceptibility; the Velachery rainfall scenarios
+provide temporal forcing. No live rainfall source is configured. Current-state
+responses use the active simulation input (the startup demo preset by default)
+and identify that source; historical scenario responses are explicitly
+scenario-based rather than live conditions.
+
+Generate the per-road hourly export with:
+
+```bash
+python girlgeeks/scripts/05_build_road_flood_risk.py
+```
+
+This writes `girlgeeks/data/processed/road_flood_risk_scenarios.csv` with one
+final state row per road and scenario after consuming all 48 hourly rainfall
+observations. The `hour` column is the elapsed scenario hour represented by the
+final state; `time_to_threshold_hours` records the first crossing during the
+full sequence, or is blank when the threshold was not reached.
 
 ## Data notes
 
