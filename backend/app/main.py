@@ -1,0 +1,40 @@
+"""FastAPI entry point: uvicorn app.main:app --reload (run from backend/)."""
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
+from app.api import network, routing, simulation
+from app.api.schemas import CreateSimulation
+from app.config import BACKEND_ROOT, load_settings
+from app.network.loader import load_network
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.settings = load_settings()
+    app.state.network = load_network(app.state.settings)
+    # Start with a demo storm so the map has something to show.
+    app.state.simulation = simulation.build_simulation(
+        app, CreateSimulation(preset="intensifying_storm")
+    )
+    yield
+
+
+app = FastAPI(title="Flood-aware emergency routing", version="0.1.0", lifespan=lifespan)
+app.include_router(network.router)
+app.include_router(simulation.router)
+app.include_router(routing.router)
+app.mount("/map", StaticFiles(directory=BACKEND_ROOT / "static", html=True), name="map")
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    return RedirectResponse("/map/")
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}

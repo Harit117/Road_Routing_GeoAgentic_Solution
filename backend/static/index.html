@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flood Simulation Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>Flood simulation</h1>
+      <p id="region" class="muted">Loading network…</p>
+    </header>
+
+    <section>
+      <h2>View</h2>
+      <div class="seg" role="radiogroup">
+        <label><input type="radio" name="mode" value="static" checked> Static hazard</label>
+        <label><input type="radio" name="mode" value="sim"> Simulation</label>
+      </div>
+      <label class="check"><input type="checkbox" id="showZones"> Hazard polygons</label>
+      <label class="check"><input type="checkbox" id="showPoints" checked> Recorded flood points</label>
+    </section>
+
+    <section>
+      <h2>Rainfall input</h2>
+      <label class="field">Preset
+        <select id="preset"></select>
+      </label>
+      <label class="field">Or custom mm/h, comma separated
+        <input id="custom" placeholder="5, 8, 20, 35, 50">
+      </label>
+      <label class="field">Flood model
+        <select id="model"></select>
+      </label>
+      <button id="create">Load rainfall</button>
+      <p id="error" class="error" hidden></p>
+    </section>
+
+    <section>
+      <h2>Timeline</h2>
+      <svg id="rainChart" viewBox="0 0 300 90" preserveAspectRatio="none" aria-label="Rainfall per tick"></svg>
+      <div class="controls">
+        <button id="step" class="secondary">Step</button>
+        <button id="play" class="secondary">Play</button>
+        <button id="run" class="secondary">Run all</button>
+        <button id="reset" class="secondary">Reset</button>
+      </div>
+      <input type="range" id="slider" min="0" max="0" value="0">
+      <p id="clock" class="clock">—</p>
+      <dl id="counts" class="counts"></dl>
+    </section>
+
+    <section>
+      <h2 id="legendTitle">Legend</h2>
+      <ul id="legend" class="legend"></ul>
+    </section>
+
+    <footer class="muted">Model rules are placeholders. Routing not implemented yet.</footer>
+  </aside>
+  <main id="map"></main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
