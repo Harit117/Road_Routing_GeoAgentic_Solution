@@ -1,0 +1,5 @@
+scenario,target_percentile,target_quantile,threshold_24h_rain_mm,selected_peak_time,peak_24h_rain_mm,difference_from_threshold_mm
+normal,P75,0.75,2.500,2019-11-10 12:00:00,2.500,0.000
+moderate,P90,0.90,9.800,2018-06-24 01:00:00,9.800,0.000
+heavy,P95,0.95,16.600,2017-10-16 22:00:00,16.600,0.000
+extreme,P99,0.99,40.128,2016-07-22 19:00:00,40.200,0.072
