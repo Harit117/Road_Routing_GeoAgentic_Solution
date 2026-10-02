@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import network, routing, simulation
+from app.api import flood_risk, network, routing, simulation
 from app.api.schemas import CreateSimulation
 from app.config import BACKEND_ROOT, load_settings
 from app.network.loader import load_network
@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Flood-aware emergency routing", version="0.1.0", lifespan=lifespan)
 app.include_router(network.router)
 app.include_router(simulation.router)
+app.include_router(flood_risk.router)
 app.include_router(routing.router)
 app.mount("/map", StaticFiles(directory=BACKEND_ROOT / "static", html=True), name="map")
 
@@ -37,4 +38,4 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "flood-aware-emergency-routing"}

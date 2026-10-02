@@ -59,8 +59,78 @@ Status bands (`simulation/engine.py`): safe < 0.5 ≤ watch < 0.8 ≤ risky < 1.
 | POST | `/api/simulation/step?n=1`, `/run`, `/reset` | Advance or rewind |
 | GET | `/api/simulation/frames/{tick}` | Loading of every road at a tick |
 | GET | `/api/simulation/onset` | Roads in the order they reached the flood threshold |
+| GET | `/api/health` | Service health |
+| GET | `/api/flood-risk/model-status` | Model implementation/calibration status for consumers |
+| GET | `/api/flood-risk/roads/{road_id}` | Latest active-simulation state for one road |
+| POST | `/api/flood-risk/roads:batch` | Latest active-simulation state for requested road IDs |
+| POST | `/api/flood-risk/simulate` | Run an isolated rainfall scenario and return per-road outputs |
 | GET | `/api/missions` | Mission profiles (medical, rescue, evacuation) |
 | POST | `/api/route` | 501 until routing is implemented |
+
+### Routing handoff: Flood & Risk Engineer (Member 2) → Routing Engineer (Member 3)
+
+The `/api/flood-risk` endpoints provide the routing integration contract. `loading`
+is a relative bucket value (`1.0` means the threshold was reached), `status` is one
+of `safe`, `watch`, `risky`, or `flooded`, and
+`time_to_threshold_minutes` is elapsed time from the scenario start (or `null` if
+the threshold was not reached during the run). These are placeholder-model outputs;
+check `/api/flood-risk/model-status` before treating them as calibrated predictions.
+
+Fetch selected current road states in one call:
+
+```http
+POST /api/flood-risk/roads:batch
+Content-Type: application/json
+
+{"road_ids": ["osm_299880378_313444440_0", "osm_299880378_313444440_1"]}
+```
+
+Response shape:
+
+```json
+{
+  "states": [
+    {
+      "road_id": "osm_299880378_313444440_0",
+      "status": "safe",
+      "loading": 0.0,
+      "rainfall_mm_per_h": 0.0,
+      "cumulative_rain_mm": 0.0,
+      "observed_at": "2026-10-03T12:00:00",
+      "time_to_threshold_minutes": null,
+      "source": "placeholder_simulation"
+    }
+  ],
+  "unknown_road_ids": ["osm_299880378_313444440_1"],
+  "observed_at": "2026-10-03T12:00:00",
+  "model_status": "placeholder"
+}
+```
+
+Run a what-if scenario without changing the active simulation used by the map or
+single-road/batch current-state endpoints:
+
+```http
+POST /api/flood-risk/simulate
+Content-Type: application/json
+
+{
+  "scenario_name": "heavy-rain",
+  "rainfall_mm_per_h": [5, 12, 25, 30, 18, 8],
+  "start_time": "2026-10-03T12:00:00Z"
+}
+```
+
+Use `preset` instead of `rainfall_mm_per_h` to select a built-in series. The
+response includes `model_status`, `model_name`, scenario timing, and a `states`
+array with one final state per road. Each state includes the first threshold
+time observed during that scenario. A single-road lookup is available at
+`GET /api/flood-risk/roads/{road_id}`; unknown roads return 404. Batch requests
+report unknown IDs in `unknown_road_ids` while returning known roads normally.
+
+The schema is defined in `app/api/schemas.py`; the calculations are isolated in
+`app/simulation/flood_risk_service.py` so Member 2 can replace the placeholder
+adapter as the historical-susceptibility and calibrated bucket model is built.
 
 ## Data notes
 

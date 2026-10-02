@@ -72,3 +72,52 @@ def test_routing_is_stubbed(client):
     assert len(client.get("/api/missions").json()) == 3
     r = client.post("/api/route", json={"mission": "medical", "origin": [80.22, 12.98]})
     assert r.status_code == 501
+
+
+def test_flood_risk_contract_for_routing(client):
+    road_id = "osm_299880378_313444440_0"
+    assert client.get("/api/health").json()["status"] == "ok"
+
+    status = client.get("/api/flood-risk/model-status").json()
+    assert status["implementation_status"] == "placeholder"
+    assert status["calibrated"] is False
+
+    single = client.get(f"/api/flood-risk/roads/{road_id}")
+    assert single.status_code == 200
+    state = single.json()
+    assert state["road_id"] == road_id
+    assert state["status"] in {"safe", "watch", "risky", "flooded"}
+    assert 0 <= state["loading"]
+    assert state["source"] == "placeholder_simulation"
+    assert client.get("/api/flood-risk/roads/not-a-road").status_code == 404
+
+    batch = client.post(
+        "/api/flood-risk/roads:batch",
+        json={"road_ids": [road_id, "not-a-road", road_id]},
+    )
+    assert batch.status_code == 200
+    batch_body = batch.json()
+    assert [item["road_id"] for item in batch_body["states"]] == [road_id]
+    assert batch_body["unknown_road_ids"] == ["not-a-road"]
+    assert batch_body["model_status"] == "placeholder"
+
+
+def test_scenario_simulation_is_isolated_and_explicitly_placeholder(client):
+    before = client.get("/api/simulation").json()["tick"]
+    response = client.post(
+        "/api/flood-risk/simulate",
+        json={
+            "scenario_name": "routing integration smoke scenario",
+            "rainfall_mm_per_h": [0, 50, 80],
+            "start_time": "2026-10-03T12:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scenario_name"] == "routing integration smoke scenario"
+    assert body["model_status"] == "placeholder"
+    assert body["model_name"] == "placeholder_bucket"
+    assert body["started_at"].startswith("2026-10-03T12:00:00")
+    assert body["states"]
+    assert all("time_to_threshold_minutes" in item for item in body["states"])
+    assert client.get("/api/simulation").json()["tick"] == before
