@@ -65,7 +65,7 @@ def test_dry_network_takes_fastest_route(client):
 
 
 def test_flood_aware_route_detours_and_respects_limit(client):
-    body = route(client, depart_tick=6, facility_id="H3").json()
+    body = route(client, depart_tick=5, facility_id="H3").json()
     assert body["status"] == "ok"
     r, f = body["route"], body["fastest"]
     assert r["blocked_m"] == 0

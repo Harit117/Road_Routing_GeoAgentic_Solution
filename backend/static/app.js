@@ -1059,7 +1059,10 @@ async function createSimulation() {
   const custom = $("custom").value.trim();
   const body = { model: $("model").value };
   if (custom) body.rainfall_mm_per_h = custom.split(/[,\s]+/).filter(Boolean).map(Number);
-  else body.preset = $("preset").value;
+  else {
+    const [kind, name] = $("preset").value.split(":");
+    body[kind] = name; // "scenario" (historical) or "preset" (synthetic)
+  }
   try {
     state.info = await post("/api/simulation", body);
     state.frames.clear();
@@ -1071,12 +1074,13 @@ async function createSimulation() {
 
 /* =================== Boot =================== */
 async function init() {
-  const [summary, roads, points, models, presets, info, missions, facilities] = await Promise.all([
+  const [summary, roads, points, models, presets, scenarios, info, missions, facilities] = await Promise.all([
     api("/api/network/summary"),
     api("/api/network/roads"),
     api("/api/network/flood-points"),
     api("/api/simulation/models"),
     api("/api/simulation/presets"),
+    api("/api/simulation/scenarios"),
     api("/api/simulation"),
     api("/api/missions"),
     api("/api/facilities"),
@@ -1090,10 +1094,18 @@ async function init() {
   $("region").textContent = `${region}, Chennai · ${summary.total_length_km} km of roads`;
   $("region").title = `${summary.roads.toLocaleString()} road segments, ${summary.intersections.toLocaleString()} intersections`;
   $("model").innerHTML = models.map((m) => `<option value="${m.name}" title="${esc(m.description)}">${m.name}</option>`).join("");
-  $("preset").innerHTML = Object.entries(presets)
-    .map(([k, s]) => `<option value="${k}">${k[0].toUpperCase() + k.slice(1).replaceAll("_", " ")} · ${s.length} h, peak ${Math.max(...s)} mm/h</option>`)
-    .join("");
-  $("preset").value = info.rainfall_source.replace("preset:", "");
+  const label = (k) => k[0].toUpperCase() + k.slice(1).replaceAll("_", " ");
+  const total = (s) => Math.round(s.reduce((a, b) => a + b, 0));
+  $("preset").innerHTML =
+    `<optgroup label="Historical Velachery rainfall (ERA5)">${Object.entries(scenarios)
+      .map(([k, s]) => `<option value="scenario:${k}">${label(k)} · ${s.length} h, ${total(s)} mm total</option>`)
+      .join("")}</optgroup>` +
+    `<optgroup label="Synthetic storms">${Object.entries(presets)
+      .map(([k, s]) => `<option value="preset:${k}">${label(k)} · ${s.length} h, peak ${Math.max(...s)} mm/h</option>`)
+      .join("")}</optgroup>`;
+  $("preset").value = info.rainfall_source
+    .replace("historical_scenario:", "scenario:")
+    .replace(/^manual$/, "");
 
   roadProps = roads.features.map((f) => f.properties);
   roadIndexById = new Map(roadProps.map((p) => [p.id, p.i]));
