@@ -3,64 +3,117 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Flood Simulation Map</title>
+  <title>Flood-Aware Routing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <aside id="panel">
-    <header>
-      <h1>Flood simulation</h1>
-      <p id="region" class="muted">Loading network…</p>
+    <header class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="9"/>
+        <path class="drop" d="M16 6c3.4 4.3 6 7.7 6 10.8a6 6 0 0 1-12 0C10 13.7 12.6 10.3 16 6z"/>
+        <path class="route" d="M12.6 18.4c1.4-2.2 3.2-.4 4.6-2.8"/>
+      </svg>
+      <div class="brand-text">
+        <h1>Flood-aware routing</h1>
+        <p id="region" class="muted">Loading…</p>
+      </div>
     </header>
 
-    <section>
-      <h2>View</h2>
-      <div class="seg" role="radiogroup">
-        <label><input type="radio" name="mode" value="static" checked> Static hazard</label>
-        <label><input type="radio" name="mode" value="sim"> Simulation</label>
+    <section class="block plan-only">
+      <h2>Mission</h2>
+      <div id="missions" class="missions" role="radiogroup" aria-label="Mission type"></div>
+    </section>
+
+    <section class="block plan-only">
+      <h2>Trip</h2>
+      <div class="trip">
+        <div class="trip-row" id="startRow">
+          <span class="trip-dot start"></span>
+          <div class="trip-body" id="startBox"></div>
+        </div>
+        <div class="trip-row">
+          <span class="trip-dot end"></span>
+          <div class="trip-body">
+            <select id="facility" aria-label="Destination"></select>
+          </div>
+        </div>
       </div>
-      <label class="check"><input type="checkbox" id="showZones"> Hazard polygons</label>
-      <label class="check"><input type="checkbox" id="showPoints" checked> Recorded flood points</label>
     </section>
 
-    <section>
-      <h2>Rainfall input</h2>
-      <label class="field">Preset
-        <select id="preset"></select>
-      </label>
-      <label class="field">Or custom mm/h, comma separated
-        <input id="custom" placeholder="5, 8, 20, 35, 50">
-      </label>
-      <label class="field">Flood model
-        <select id="model"></select>
-      </label>
-      <button id="create">Load rainfall</button>
-      <p id="error" class="error" hidden></p>
-    </section>
+    <section id="result" class="block result" aria-live="polite"></section>
 
-    <section>
-      <h2>Timeline</h2>
-      <svg id="rainChart" viewBox="0 0 300 90" preserveAspectRatio="none" aria-label="Rainfall per tick"></svg>
-      <div class="controls">
-        <button id="step" class="secondary">Step</button>
-        <button id="play" class="secondary">Play</button>
-        <button id="run" class="secondary">Run all</button>
-        <button id="reset" class="secondary">Reset</button>
+    <details class="block fold plan-only">
+      <summary>Rainfall scenario</summary>
+      <div class="fold-body">
+        <label class="field">Preset storm
+          <select id="preset"></select>
+        </label>
+        <label class="field">Or custom intensities, mm/h for each hour
+          <input id="custom" placeholder="e.g. 5, 8, 20, 35, 50">
+        </label>
+        <label class="field">Flood model
+          <select id="model"></select>
+        </label>
+        <button id="create" class="primary">Load scenario</button>
+        <p id="error" class="error" hidden></p>
       </div>
-      <input type="range" id="slider" min="0" max="0" value="0">
-      <p id="clock" class="clock">—</p>
-      <dl id="counts" class="counts"></dl>
-    </section>
+    </details>
 
-    <section>
-      <h2 id="legendTitle">Legend</h2>
-      <ul id="legend" class="legend"></ul>
-    </section>
-
-    <footer class="muted">Model rules are placeholders. Routing not implemented yet.</footer>
+    <p class="footnote">Development build: the flood model, travel speeds and facilities are placeholders.</p>
   </aside>
-  <main id="map"></main>
+
+  <main id="stage">
+    <div id="map"></div>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+
+    <div id="loading" class="loading-overlay">
+      <span class="spinner big"></span>
+      <span>Loading road network…</span>
+    </div>
+
+    <div class="map-top">
+      <div id="legend" class="legend-card"></div>
+      <div class="mode-toggle" role="radiogroup" aria-label="Road colouring">
+        <label><input type="radio" name="mode" value="sim" checked> Flood forecast</label>
+        <label><input type="radio" name="mode" value="static"> Hazard zones</label>
+      </div>
+    </div>
+
+    <div id="timeline" class="timeline">
+      <div class="tl-buttons">
+        <button id="play" class="icon-btn play" title="Play storm" aria-label="Play storm">
+          <svg viewBox="0 0 24 24"><path id="playIcon" d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button id="step" class="icon-btn" title="Next hour" aria-label="Next hour">
+          <svg viewBox="0 0 24 24"><path d="M6 5v14l9-7zM16 5h3v14h-3z"/></svg>
+        </button>
+        <button id="reset" class="icon-btn" title="Back to the start of the storm" aria-label="Back to start">
+          <svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+        </button>
+      </div>
+      <div class="tl-main">
+        <div class="tl-head">
+          <div class="tl-time"><b id="clockTime">--:--</b><span id="clockHour" class="muted"></span></div>
+          <div id="clockRain" class="tl-rain"></div>
+          <div class="tl-net" title="Share of roads in each flood status">
+            <span class="muted">Network</span>
+            <div id="netBar" class="net-bar"></div>
+          </div>
+        </div>
+        <div class="tl-track">
+          <svg id="rainChart" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <input type="range" id="slider" min="0" max="0" value="0" aria-label="Storm hour">
+          <div id="hourLabels" class="hour-labels"></div>
+        </div>
+      </div>
+    </div>
+  </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>

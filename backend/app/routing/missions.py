@@ -1,9 +1,8 @@
-"""Mission profiles: what a route is for, and how much flood risk it tolerates.
+"""Mission profiles: where a trip goes and how much flood risk it tolerates.
 
-Routing is not implemented yet. These profiles fix the shape A* will consume:
-edge cost = travel_time + flood_penalty_weight * flood_risk, and edges whose
-loading exceeds max_loading are treated as closed.
-PLACEHOLDER values until the routing member tunes them.
+Edge cost = travel_minutes * (1 + flood_penalty_weight * loading^2), and any
+road whose loading reaches max_loading by the time the vehicle gets there is
+treated as closed. PLACEHOLDER values until tuned against the real model.
 """
 
 from dataclasses import dataclass
@@ -13,17 +12,18 @@ from dataclasses import dataclass
 class MissionProfile:
     id: str
     label: str
-    destination_type: str  # "hospital", "relief_centre", ...
+    facility_type: str  # which facilities this mission can end at
     vehicle: str
-    flood_penalty_weight: float  # the lambda in the cost function
-    max_loading: float  # roads above this loading are impassable for this vehicle
+    flood_penalty_weight: float  # lambda: how strongly wet roads are avoided
+    max_loading: float  # roads at or above this loading are impassable
 
 
 MISSIONS: dict[str, MissionProfile] = {
     m.id: m
     for m in [
-        MissionProfile("medical", "Medical emergency", "hospital", "ambulance", 5.0, 0.8),
-        MissionProfile("rescue", "Rescue operation", "relief_centre", "rescue_truck", 2.0, 1.2),
+        # An ambulance accepts some wet road to save time on a critical patient.
+        MissionProfile("medical", "Medical emergency", "hospital", "ambulance", 4.0, 0.8),
+        # A loaded evacuation bus is cautious: it avoids water earlier and harder.
         MissionProfile("evacuation", "Evacuation", "relief_centre", "bus", 8.0, 0.6),
     ]
 }

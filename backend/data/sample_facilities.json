@@ -1,0 +1,16 @@
+{
+  "note": "SAMPLE facilities for development. Names and locations are illustrative, not real hospitals or relief centres. Each is attached to a road-network intersection (node_id).",
+  "facilities": [
+    {"id": "H1", "type": "hospital", "name": "Sample Hospital, Velachery Main Road", "node_id": 338406860},
+    {"id": "H2", "type": "hospital", "name": "Sample Hospital, Inner Ring Road West", "node_id": 6510959128},
+    {"id": "H3", "type": "hospital", "name": "Sample Hospital, Taramani Link Road", "node_id": 251172944},
+    {"id": "H4", "type": "hospital", "name": "Sample Hospital, Medavakkam Main Road", "node_id": 277912694},
+    {"id": "H5", "type": "hospital", "name": "Sample Hospital, Velachery Bypass Road", "node_id": 338406648},
+    {"id": "H6", "type": "hospital", "name": "Sample Hospital, Inner Ring Road South", "node_id": 1355465117},
+    {"id": "R1", "type": "relief_centre", "name": "Sample Relief Centre, Marudupandi Street", "node_id": 325207488},
+    {"id": "R2", "type": "relief_centre", "name": "Sample Relief Centre, New Colony", "node_id": 251172939},
+    {"id": "R3", "type": "relief_centre", "name": "Sample Relief Centre, MGR Salai", "node_id": 1944183675},
+    {"id": "R4", "type": "relief_centre", "name": "Sample Relief Centre, Venkatraman Street", "node_id": 300279803},
+    {"id": "R5", "type": "relief_centre", "name": "Sample Relief Centre, Nethaji Road", "node_id": 300159695}
+  ]
+}

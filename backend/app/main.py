@@ -10,12 +10,19 @@ from app.api import flood_risk, network, routing, simulation
 from app.api.schemas import CreateSimulation
 from app.config import BACKEND_ROOT, load_settings
 from app.network.loader import load_network
+from app.routing.facilities import load_facilities
+from app.routing.graph import RoutingGraph
+from app.routing.planner import Planner
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.settings = load_settings()
     app.state.network = load_network(app.state.settings)
+    app.state.planner = Planner(
+        RoutingGraph(app.state.network),
+        load_facilities(app.state.settings.facilities_file, app.state.network),
+    )
     # Start with a demo storm so the map has something to show.
     app.state.simulation = simulation.build_simulation(
         app, CreateSimulation(preset="intensifying_storm")

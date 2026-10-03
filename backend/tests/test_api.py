@@ -68,12 +68,6 @@ def test_bad_input_rejected(client):
     assert client.post("/api/simulation", json={"preset": "cloudburst", "model": "nope"}).status_code == 422
 
 
-def test_routing_is_stubbed(client):
-    assert len(client.get("/api/missions").json()) == 3
-    r = client.post("/api/route", json={"mission": "medical", "origin": [80.22, 12.98]})
-    assert r.status_code == 501
-
-
 def test_flood_risk_contract_for_routing(client):
     road_id = "osm_299880378_313444440_0"
     assert client.get("/api/health").json()["status"] == "ok"

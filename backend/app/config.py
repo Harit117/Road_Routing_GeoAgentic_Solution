@@ -19,6 +19,8 @@ class Settings:
     region: str
     # Length of one simulation tick. Open-Meteo rainfall is hourly.
     step_minutes: int
+    # Hospitals and relief centres that missions can route to.
+    facilities_file: Path
 
 
 def load_settings() -> Settings:
@@ -30,4 +32,9 @@ def load_settings() -> Settings:
         ),
         region=os.environ.get("FLOOD_REGION", "velachery"),
         step_minutes=int(os.environ.get("FLOOD_STEP_MINUTES", "60")),
+        facilities_file=Path(
+            os.environ.get(
+                "FLOOD_FACILITIES_FILE", BACKEND_ROOT / "data" / "sample_facilities.json"
+            )
+        ),
     )

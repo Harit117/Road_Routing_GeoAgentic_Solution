@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 from app.api.schemas import (
     CreateSimulation,
@@ -102,6 +103,25 @@ def run(request: Request):
     sim = _sim(request)
     sim.run()
     return _info(sim)
+
+
+class UpdateRainfall(BaseModel):
+    rainfall_mm_per_h: list[float] = Field(min_length=1, max_length=720)
+
+
+@router.post("/rainfall", response_model=SimulationInfo)
+def update_rainfall(body: UpdateRainfall, request: Request):
+    """Replace the rainfall series mid-storm (e.g. a heavier burst than
+    forecast). Same model and start time; replays to the current tick."""
+    sim = _sim(request)
+    try:
+        rainfall = from_values(body.rainfall_mm_per_h, sim.rainfall.start)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    replayed = Simulation(sim.network, create_model(sim.model.name), rainfall, sim.step_minutes)
+    replayed.run(max_steps=sim.tick)
+    request.app.state.simulation = replayed
+    return _info(replayed)
 
 
 @router.post("/reset", response_model=SimulationInfo)
