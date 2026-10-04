@@ -53,10 +53,9 @@ def test_flood_zones_split_the_fleet(client):
     coordinated = body["report"]["coordinated"]
     independent = body["report"]["independent"]
     assert independent["overloaded_roads"] > 0
-    assert coordinated["overloaded_roads"] < independent["overloaded_roads"]
+    # The objective is time lost to jams, not the number of shared roads.
     assert coordinated["estimated_jam_delay_min"] < independent["estimated_jam_delay_min"]
-    split = [v for v in body["plans"]["coordinated"] if v["changed"]]
-    assert split and all(v["extra_minutes"] >= 0 for v in split)
+    assert any(v["changed"] for v in body["plans"]["coordinated"])
     # Every overloaded road really is over its zone cap.
     for road in coordinated["roads"] + independent["roads"]:
         assert len(road["vehicles"]) > road["cap"]
@@ -133,3 +132,17 @@ def test_forced_facility_is_never_switched(client):
         json={"vehicles": [{"mission": "medical", "origin": p, "facility_id": "H3"} for p in CLUSTER], "depart_tick": 5},
     ).json()
     assert {v["destination"]["id"] for v in r["plans"]["coordinated"]} == {"H3"}
+
+
+def test_detours_never_outweigh_the_jam(client):
+    rules = CongestionRules()
+    for tick in (5, 6):
+        body = dispatch(client, tick=tick, points=EIGHT)
+        alone = {v["id"]: v["route"]["minutes"] for v in body["plans"]["independent"]}
+        for v in body["plans"]["coordinated"]:
+            d = v["destination_decision"]
+            if d["switched"]:
+                continue  # judged by the facility-switch rule instead
+            assert v["route"]["minutes"] - alone[v["id"]] <= rules.detour_limit(alone[v["id"]]) + 1e-6
+            if v["changed"]:
+                assert d["reason"].startswith("Re-routed")

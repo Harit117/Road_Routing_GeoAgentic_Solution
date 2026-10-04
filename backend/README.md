@@ -148,10 +148,15 @@ fleet so that does not happen.
 
 * "At a time" means the vehicles' time on the road overlaps within ±2 min;
   both directions of a street count as one road.
-* Vehicles are routed one by one, medical before evacuation. A later vehicle
-  pays `overflow_penalty` (3x per extra vehicle) for using a road already at
-  its zone cap, so it is split onto another route or another facility when a
-  reasonable one exists. Congestion never closes a road, so nobody is stranded.
+* Vehicles are routed one by one, medical before evacuation. Everything is
+  judged in **jam-adjusted time** = drive minutes + expected jam delay, where
+  each vehicle over a road's cap adds that road's drive time × 1 (orange) or
+  × 2 (red). The router adds exactly that delay as cost, so it never trades a
+  long detour for a short jam.
+* A vehicle is re-routed only if the detour beats waiting in the jam, and
+  never by more than `max_detour_min` (2) or `max_detour_fraction` (30%) of
+  its direct drive, whichever is larger. Otherwise it keeps the direct route
+  and the jam is reported. Congestion never closes a road.
 * Congestion changes the **route, not the destination**. Each vehicle keeps
   the facility it would choose alone, unless another one is faster in
   **jam-adjusted time** (drive minutes + expected jam delay from vehicles
@@ -161,7 +166,7 @@ fleet so that does not happen.
   carries a `destination_decision` with both times and the reason.
 * Every response holds both `plans.coordinated` and `plans.independent`
   (everyone routes alone) and a `report` for each: roads over cap, metres over
-  cap, an estimated jam delay (`jam_delay_factor`), average and slowest drive.
+  cap, an estimated jam delay, average and slowest drive.
 * Rules are `CongestionRules` in `fleet.py` (`GET /api/fleet/rules`):
   PLACEHOLDER values to tune.
 

@@ -45,11 +45,16 @@ class CongestionRules:
     orange_loading: float = 0.5
     # Two vehicles are "on the road together" if their times overlap within this.
     window_min: float = 2.0
-    # Cost multiplier added per vehicle over the cap (soft, never a closure).
-    overflow_penalty: float = 3.0
-    # Estimated slowdown per extra vehicle in a jam: share of the road's
-    # drive time added (used for jam-adjusted ETAs and the report).
-    jam_delay_factor: float = 0.5
+    # Expected jam delay per extra vehicle over the cap, as a share of that
+    # road's drive time. Red-zone jams last longer. This one number is used
+    # both by the router (as added cost, never a closure) and for jam-adjusted
+    # ETAs, so a detour is only taken when it really saves time.
+    orange_jam_factor: float = 1.0
+    red_jam_factor: float = 2.0
+    # Never accept a detour longer than this to avoid a jam (the larger of the
+    # two); beyond it the vehicle keeps its direct route and the jam is reported.
+    max_detour_min: float = 2.0
+    max_detour_fraction: float = 0.30
     # Congestion re-routes a vehicle; it does not send it to a different
     # facility unless that is clearly faster once jams are counted: the other
     # facility's jam-adjusted time must beat its own by BOTH margins.
@@ -65,6 +70,15 @@ class CongestionRules:
 
     def cap(self, zone: str) -> int:
         return self.red_cap if zone == "red" else self.orange_cap
+
+    def jam_delay(self, zone: str, minutes: float, excess: int) -> float:
+        if excess <= 0:
+            return 0.0
+        factor = self.red_jam_factor if zone == "red" else self.orange_jam_factor
+        return minutes * factor * excess
+
+    def detour_limit(self, direct_minutes: float) -> float:
+        return max(self.max_detour_min, self.max_detour_fraction * direct_minutes)
 
 
 # Lower runs first: urgent missions get first pick of the roads.
@@ -168,17 +182,50 @@ class FleetDispatcher:
             raise PlanningError(f"{v.id}: {e}") from e
 
     def _coordinated_plan(self, v, alone: dict, forecast, blocked, occupancy: "_Occupancy"):
-        """Re-route around jams, keeping the vehicle's own facility unless
-        another one is clearly faster once expected jam delay is counted."""
-        wrapper = self._congestion(occupancy, forecast, v.id)
-        home = alone.get("destination")
-        if v.facility_id or home is None:
-            # Destination forced by the user, or none reachable at all.
-            return self._plan(v, forecast, blocked, wrapper), None
+        """Decide this vehicle's coordinated plan, given vehicles already routed.
 
-        to_home = self._plan(v, forecast, blocked, wrapper, facility_id=home["id"])
-        best = self._plan(v, forecast, blocked, wrapper)
-        home_eff = self._jam_adjusted(to_home, occupancy, v.id)
+        1. Route: take the jam-avoiding route to its own facility only if it is
+           faster in jam-adjusted time than driving the direct route through
+           the jam, and the detour stays within the detour limit.
+        2. Facility: keep its own facility unless another one is clearly
+           faster once expected jam delay is counted.
+        """
+        home = alone.get("destination")
+        if home is None or not alone.get("route"):
+            return alone, None
+        wrapper = self._congestion(occupancy, forecast, v.id)
+
+        direct = self._jam_adjusted(alone, occupancy, v.id)
+        to_home, home_eff, route_reason = alone, direct, None
+        if direct["jam_delay"] > 0:
+            split = self._plan(v, forecast, blocked, wrapper, facility_id=home["id"])
+            split_eff = self._jam_adjusted(split, occupancy, v.id)
+            detour = split_eff["total_drive"] - direct["total_drive"]
+            limit = self.rules.detour_limit(direct["total_drive"])
+            if split.get("route") and split["route"]["road_ids"] == alone["route"]["road_ids"]:
+                route_reason = (
+                    f"Kept direct route: no other road avoids the jam (~{direct['jam_delay']:.1f} min expected)"
+                )
+            elif split["status"] != "ok" and alone["status"] == "ok":
+                route_reason = "Kept direct route: the alternative goes over the flood limit"
+            elif detour > limit:
+                route_reason = (
+                    f"Kept direct route through the jam: avoiding it needs +{detour:.1f} min "
+                    f"(limit {limit:.1f})"
+                )
+            elif split_eff["total"] >= direct["total"]:
+                route_reason = (
+                    f"Kept direct route: a detour (+{detour:.1f} min) would not beat "
+                    f"waiting in the jam (+{direct['jam_delay']:.1f} min)"
+                )
+            else:
+                to_home, home_eff = split, split_eff
+                avoided = direct["jam_delay"] - split_eff["jam_delay"]
+                cost = f"+{detour:.1f} min drive" if detour >= 0.05 else (
+                    f"{-detour:.1f} min shorter drive" if detour <= -0.05 else "same drive time"
+                )
+                route_reason = f"Re-routed: {cost}, avoids ~{avoided:.1f} min of jam"
+
         decision = {
             "home": home["id"],
             "chosen": home["id"],
@@ -186,8 +233,13 @@ class FleetDispatcher:
             "home_minutes": home_eff["minutes"],
             "home_jam_delay_min": home_eff["jam_delay"],
             "alternative": None,
-            "reason": f"Kept {home['id']}: congestion only changes the route",
+            "route_reason": route_reason,
+            "reason": route_reason or f"Kept {home['id']}: no jam on its route",
         }
+        if v.facility_id:
+            return to_home, decision  # destination forced by the user
+
+        best = self._plan(v, forecast, blocked, wrapper)
         alt = best.get("destination")
         if alt is None or alt["id"] == home["id"] or not best.get("route"):
             return to_home, decision
@@ -226,18 +278,19 @@ class FleetDispatcher:
                 ),
             )
             return best, decision
-        decision["reason"] = (
-            f"Kept {home['id']}: {alt['id']} would save only {saving:.1f} min (needs {needed:.1f})"
-            if saving > 0
-            else f"Kept {home['id']}: {alt['id']} is not faster ({alt_eff['total']:.1f} vs {home_eff['total']:.1f} min with jams)"
-        )
+        if route_reason is None:
+            decision["reason"] = (
+                f"Kept {home['id']}: {alt['id']} would save only {saving:.1f} min (needs {needed:.1f})"
+                if saving > 0
+                else f"Kept {home['id']}: {alt['id']} is not faster ({alt_eff['total']:.1f} vs {home_eff['total']:.1f} min with jams)"
+            )
         return to_home, decision
 
     def _jam_adjusted(self, plan: dict, occupancy: "_Occupancy", vid: str) -> dict:
         """Drive time plus the delay expected from vehicles already routed."""
         route = plan.get("route")
         if not route:
-            return {"minutes": None, "jam_delay": None, "total": float("inf")}
+            return {"minutes": None, "jam_delay": None, "total": float("inf"), "total_drive": float("inf")}
         roads = self.planner.graph.network.roads
         delay = 0.0
         for s in route["segments"]:
@@ -247,13 +300,12 @@ class FleetDispatcher:
                 continue
             start = s["enter_min"]
             sharing = occupancy.count(self._physical[i], start, start + s["minutes"], self.rules.window_min, exclude=vid)
-            excess = sharing + 1 - self.rules.cap(zone)
-            if excess > 0:
-                delay += s["minutes"] * self.rules.jam_delay_factor * excess
+            delay += self.rules.jam_delay(zone, s["minutes"], sharing + 1 - self.rules.cap(zone))
         return {
             "minutes": round(route["minutes"], 2),
             "jam_delay": round(delay, 2),
             "total": route["minutes"] + delay,
+            "total_drive": route["minutes"],
         }
 
     def _congestion(self, occupancy: _Occupancy, forecast: FloodForecast, vid: str):
@@ -272,10 +324,11 @@ class FleetDispatcher:
                 if zone is None:
                     return result
                 sharing = occupancy.count(physical[i], t, t + minutes, rules.window_min, exclude=vid)
-                excess = sharing + 1 - rules.cap(zone)
-                if excess <= 0:
-                    return result
-                return cost * (1 + rules.overflow_penalty * excess), minutes
+                # Add exactly the expected jam delay, in minutes: the same
+                # figure used to judge the route, so A* never "pays" more
+                # detour than the jam would actually cost.
+                delay = rules.jam_delay(zone, minutes, sharing + 1 - rules.cap(zone))
+                return (cost + delay, minutes) if delay else result
 
             return congested
 
@@ -319,7 +372,7 @@ class FleetDispatcher:
                 excess = len(others) + 1 - rules.cap(zone)
                 if excess <= 0:
                     continue
-                delay += s["minutes"] * rules.jam_delay_factor * excess
+                delay += rules.jam_delay(zone, s["minutes"], excess)
                 phys = self._physical[i]
                 entry = overloaded.setdefault(
                     phys,
