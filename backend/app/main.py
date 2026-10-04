@@ -7,6 +7,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import flood_risk, network, routing, simulation, agent
+from app.agent.coordinator import Coordinator
 from app.api.schemas import CreateSimulation
 from app.config import BACKEND_ROOT, load_settings
 from app.flood.config import RiskModelConfig
@@ -34,6 +35,10 @@ async def lifespan(app: FastAPI):
     app.state.simulation = simulation.build_simulation(
         app, CreateSimulation(preset="intensifying_storm")
     )
+    app.state.coordinator = Coordinator(
+    planner=app.state.planner,
+    simulation=app.state.simulation,
+)
     yield
 
 
