@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import flood_risk, network, routing, simulation
+from app.api import flood_risk, network, routing, simulation, agent
 from app.api.schemas import CreateSimulation
 from app.config import BACKEND_ROOT, load_settings
 from app.flood.config import RiskModelConfig
@@ -42,6 +42,7 @@ app.include_router(network.router)
 app.include_router(simulation.router)
 app.include_router(flood_risk.router)
 app.include_router(routing.router)
+app.include_router(agent.router)
 app.mount("/map", StaticFiles(directory=BACKEND_ROOT / "static", html=True), name="map")
 
 
