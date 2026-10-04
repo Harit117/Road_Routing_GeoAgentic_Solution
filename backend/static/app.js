@@ -133,7 +133,7 @@ function renderLegend() {
     .map(([c, label]) => `<span><i class="swatch" style="background:${c}"></i>${label}</span>`)
     .join("")}</div>`;
   if (state.fleetMode && state.fleetPlan) {
-    html += `<div class="lg-row"><span><i class="line-key" style="border-top:4px solid #64748b;border-radius:2px"></i>Vehicle routes (one colour each)</span><span><i class="line-key" style="border-top:4px dashed #111827"></i>Jam: over zone cap</span></div>`;
+    html += `<div class="lg-row"><span><i class="line-key" style="border-top:6px solid #64748b;border-radius:3px"></i>Vehicle route: outline = vehicle, centre = flood when reached</span><span><i class="line-key" style="border-top:4px dashed #111827"></i>Jam: over zone cap</span></div>`;
   } else if (state.drive) {
     html += `<div class="lg-row"><span><i class="line-key route"></i>Route ahead</span><span><i class="line-key" style="border-top:4px solid #64748b;border-radius:2px"></i>Driven</span></div>`;
   } else if (state.plan?.route) {
@@ -459,12 +459,22 @@ function drawPlan() {
 }
 
 /* =================== Result panel =================== */
+/** When every road is past its threshold, the forecast can no longer change
+ *  (the flood model has no drainage), so no route can change either. */
+function saturationNotice() {
+  if (!state.loading?.length || !state.loading.every((x) => x >= 1)) return "";
+  return alert(
+    "warn",
+    "<b>Every road is flooded from this hour on.</b> The flood model has no drainage, so roads never recover and routes cannot change any more. Drag back to an earlier hour or load a lighter storm."
+  );
+}
+
 function renderResult() {
   if (state.fleetMode) return renderFleetResult();
   const el = $("result");
   const mission = currentMission();
   const word = FACILITY_WORD[mission.facility_type];
-  const head = `<div class="result-head"><h2>Route</h2>${state.planning ? '<span class="spinner"></span>' : ""}</div>`;
+  const head = `<div class="result-head"><h2>Route</h2>${state.planning ? '<span class="spinner"></span>' : ""}</div>${saturationNotice()}`;
 
   if (!state.origin) {
     el.innerHTML = `${head}<ol class="guide">
@@ -1197,6 +1207,25 @@ function renderFleetList() {
   );
 }
 
+/** One fleet route: the vehicle's colour as a wide outline, and the flood
+ *  status each road will have when the vehicle reaches it as the centre line
+ *  (as single mode colours its route), so flood changes are visible. */
+function drawFleetRoute(layer, id, color, destId, segs, minutes) {
+  const pane = "routePane";
+  const lines = segs.map((s) => s.pts);
+  L.polyline(lines, { pane, color: "#fff", weight: 11, interactive: false }).addTo(layer);
+  L.polyline(lines, { pane, color, weight: 8, opacity: 0.95, lineCap: "round", interactive: false }).addTo(layer);
+  for (const s of segs) {
+    L.polyline(s.pts, { pane, color: STATUS_COLORS[s.status], weight: 3, opacity: 1, lineCap: "round" })
+      .bindTooltip(
+        `<b>${id}</b> → ${destId}${minutes != null ? ` · ${fmtMin(minutes)} min` : ""}` +
+          `<br>${esc(s.name || "Unnamed road")}: ${pct(s.loading)} loading when reached`,
+        { sticky: true }
+      )
+      .addTo(layer);
+  }
+}
+
 function drawFleet() {
   fleetLayer.clearLayers();
   // During playback each vehicle draws its own live route (drawFleetAhead).
@@ -1207,11 +1236,7 @@ function drawFleet() {
   for (const v of state.fleet) {
     const p = planned.get(v.id);
     if (!p?.route) continue;
-    const lines = p.route.segments.map((s) => s.coords.map(ll));
-    L.polyline(lines, { pane, color: "#fff", weight: 9, interactive: false }).addTo(fleetLayer);
-    L.polyline(lines, { pane, color: v.color, weight: 5, opacity: 0.95, lineCap: "round" })
-      .bindTooltip(`<b>${v.id}</b> → ${p.destination.id} · ${fmtMin(p.route.minutes)} min`, { sticky: true })
-      .addTo(fleetLayer);
+    drawFleetRoute(fleetLayer, v.id, v.color, p.destination.id, p.route.segments.map((s) => ({ ...s, pts: s.coords.map(ll) })), p.route.minutes);
   }
   const report = state.fleetPlan?.report?.[state.fleetView];
   for (const r of report?.roads || []) {
@@ -1242,7 +1267,7 @@ function drawFleet() {
 function renderFleetResult() {
   if (state.fleetPlay) return renderFleetPlayPanel();
   const el = $("result");
-  const head = `<div class="result-head"><h2>Fleet routes</h2>${state.fleetPlanning ? '<span class="spinner"></span>' : ""}</div>`;
+  const head = `<div class="result-head"><h2>Fleet routes</h2>${state.fleetPlanning ? '<span class="spinner"></span>' : ""}</div>${saturationNotice()}`;
   if (!state.fleet.length) {
     el.innerHTML = `${head}<ol class="guide">
       <li>Pick the mission for the next vehicle</li>
@@ -1393,11 +1418,7 @@ function startFleetPlay() {
 function drawFleetAhead(it, fromSeg) {
   it.layer?.remove();
   const group = L.layerGroup();
-  const lines = it.segs.slice(fromSeg).map((s) => s.pts);
-  L.polyline(lines, { pane: "routePane", color: "#fff", weight: 9, interactive: false }).addTo(group);
-  L.polyline(lines, { pane: "routePane", color: it.color, weight: 5, opacity: 0.95, lineCap: "round" })
-    .bindTooltip(`<b>${it.id}</b> → ${it.plan.destination.id}`, { sticky: true })
-    .addTo(group);
+  drawFleetRoute(group, it.id, it.color, it.plan.destination.id, it.segs.slice(fromSeg), null);
   group.addTo(map);
   it.layer = group;
   it.drawnFromSeg = fromSeg;
