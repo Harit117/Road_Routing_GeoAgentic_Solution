@@ -804,7 +804,7 @@ function driveFrame() {
 
   // Flood colours follow the clock (every 15 simulated seconds).
   const stamp = Math.floor(d.nowMin * 4);
-  if (stamp !== d.lastFloodStamp && !d.floodBusy) {
+  if (stamp !== d.lastFloodStamp && !floodBusy) {
     d.lastFloodStamp = stamp;
     updateFloodAt(d.nowMin);
   }
@@ -823,10 +823,16 @@ async function ensureFrame(k) {
   return state.frames.get(k);
 }
 
+// The trip in progress: single-vehicle drive or fleet playback. Both share
+// live flood colours, incidents and rain bursts.
+const activeTrip = () => state.drive || state.fleetPlay;
+const tripOver = (t) => !t || t.arrived || t.finished;
+const renderTripPanel = () => (state.drive ? renderDrivePanel() : renderFleetPlayPanel());
+let floodBusy = false;
+
 /** Show the network's flood state at a fractional minute (between hourly frames). */
 async function updateFloodAt(min) {
-  const d = state.drive;
-  d.floodBusy = true;
+  floodBusy = true;
   try {
     const total = state.info.total_ticks;
     const t = Math.min(min / stepMin(), total);
@@ -840,7 +846,7 @@ async function updateFloodAt(min) {
     renderFacilities();
     renderDriveTimeline(min);
   } finally {
-    d.floodBusy = false;
+    floodBusy = false;
   }
 }
 
@@ -848,7 +854,9 @@ function renderDriveTimeline(min) {
   const info = state.info;
   const k = Math.min(Math.floor(min / stepMin()), info.total_ticks);
   $("clockTime").textContent = minuteTime(min);
-  $("clockHour").textContent = state.drive?.arrived ? "Arrived" : "Trip in progress";
+  $("clockHour").textContent = state.fleetPlay
+    ? state.fleetPlay.finished ? "Fleet arrived" : "Fleet en route"
+    : state.drive?.arrived ? "Arrived" : "Trip in progress";
   const rain = info.rainfall_mm_per_h[k];
   $("clockRain").innerHTML = `${ICONS.rain}<span>${rain != null ? `<b>${rain}</b> mm/h now` : "Storm over"}</span>`;
   const counts = { safe: 0, watch: 0, risky: 0, flooded: 0 };
@@ -909,8 +917,8 @@ async function replanDrive(d) {
 }
 
 async function rainBurst() {
-  const d = state.drive;
-  if (!d || d.arrived) return;
+  const d = activeTrip();
+  if (tripOver(d)) return;
   const k = Math.floor(d.nowMin / stepMin());
   const rain = [...state.info.rainfall_mm_per_h];
   while (rain.length <= k + 1) rain.push(0);
@@ -926,24 +934,24 @@ async function rainBurst() {
     });
     d.lastFloodStamp = null; // refresh flood colours
     d.lastReplanMin = -Infinity; // and re-check the route right away
-    renderDrivePanel();
+    renderTripPanel();
   } catch (e) {
     d.events.push({ min: d.nowMin, kind: "danger", text: `Rain update failed: ${e.message}` });
-    renderDrivePanel();
+    renderTripPanel();
   }
 }
 
 /** Mid-trip map click: report the clicked road as blocked (an incident). */
 async function reportIncident(latlng) {
-  const d = state.drive;
-  if (!d || d.arrived) return;
+  const d = activeTrip();
+  if (tripOver(d)) return;
   let road;
   try {
     road = await api(`/api/snap?lon=${latlng.lng}&lat=${latlng.lat}`);
   } catch {
     return; // clicked away from any road
   }
-  if (state.drive !== d || d.blocked.some((b) => b.road_id === road.road_id)) return;
+  if (activeTrip() !== d || d.blocked.some((b) => b.road_id === road.road_id)) return;
   d.blocked.push(road);
   const pts = road.coords.map((c) => [c[1], c[0]]);
   L.polyline(pts, { pane: "routePane", color: "#fff", weight: 9, interactive: false }).addTo(d.blockLayer);
@@ -955,7 +963,7 @@ async function reportIncident(latlng) {
   }).addTo(d.blockLayer);
   d.events.push({ min: d.nowMin, kind: "danger", text: `Incident: ${road.name || "unnamed road"} reported blocked.` });
   d.lastReplanMin = -Infinity; // re-check the route right away
-  renderDrivePanel();
+  renderTripPanel();
 }
 
 function arrive(d) {
@@ -1191,7 +1199,8 @@ function renderFleetList() {
 
 function drawFleet() {
   fleetLayer.clearLayers();
-  if (!state.fleetMode) return;
+  // During playback each vehicle draws its own live route (drawFleetAhead).
+  if (!state.fleetMode || state.fleetPlay) return;
   const ll = (c) => [c[1], c[0]];
   const pane = "routePane";
   const planned = new Map(fleetVehicles().map((v) => [v.id, v]));
@@ -1330,7 +1339,7 @@ function startFleetPlay() {
   if (!vehicles.length) return;
   stopPlaying();
   const startMin = state.tick * stepMin();
-  state.fleetPlay = {
+  const fp = {
     view: state.fleetView,
     startMin,
     nowMin: startMin,
@@ -1338,6 +1347,14 @@ function startFleetPlay() {
     paused: false,
     finished: false,
     lastPanelTs: 0,
+    // Same live checks as single-vehicle drive mode.
+    lastReplanMin: startMin,
+    lastFloodStamp: null,
+    replanning: false,
+    reroutes: 0,
+    blocked: [],
+    blockLayer: L.layerGroup().addTo(map), // own layers: drawFleet() clears fleetLayer
+    events: [{ min: startMin, kind: "ok", text: `Fleet of ${vehicles.length} departed (${state.fleetView} plan)` }],
     items: vehicles.map((v) => {
       const color = state.fleet.find((x) => x.id === v.id)?.color || "#334155";
       const segs = prepareRoute(v.route);
@@ -1347,14 +1364,43 @@ function startFleetPlay() {
         interactive: false,
         keyboard: false,
       }).addTo(map);
-      return { v, color, segs, marker, done: false };
+      return {
+        id: v.id,
+        mission: v.mission,
+        color,
+        plan: v,
+        segs,
+        routeStartMin: startMin,
+        marker,
+        layer: null,
+        drawnFromSeg: -1,
+        pos: null,
+        done: false,
+        reroutes: 0,
+      };
     }),
   };
+  state.fleetPlay = fp;
   document.body.classList.add("driving");
   $("timeline").classList.add("locked");
+  $("slider").step = "any";
   drawFleet();
-  state.fleetPlay.timer = setInterval(fleetFrame, DRIVE_TICK_MS);
+  fp.timer = setInterval(fleetFrame, DRIVE_TICK_MS);
   renderFleetPlayPanel();
+}
+
+/** Draw the part of a vehicle's route still ahead of it. */
+function drawFleetAhead(it, fromSeg) {
+  it.layer?.remove();
+  const group = L.layerGroup();
+  const lines = it.segs.slice(fromSeg).map((s) => s.pts);
+  L.polyline(lines, { pane: "routePane", color: "#fff", weight: 9, interactive: false }).addTo(group);
+  L.polyline(lines, { pane: "routePane", color: it.color, weight: 5, opacity: 0.95, lineCap: "round" })
+    .bindTooltip(`<b>${it.id}</b> → ${it.plan.destination.id}`, { sticky: true })
+    .addTo(group);
+  group.addTo(map);
+  it.layer = group;
+  it.drawnFromSeg = fromSeg;
 }
 
 function fleetFrame() {
@@ -1365,22 +1411,93 @@ function fleetFrame() {
     fp.nowMin += (Math.min((ts - fp.lastTs) / 1000, 0.5) * state.speed) / 60;
   }
   fp.lastTs = ts;
-  const elapsed = fp.nowMin - fp.startMin;
   let all = true;
   for (const it of fp.items) {
-    const pos = positionAt(it.segs, Math.min(elapsed, it.v.route.minutes));
-    if (pos) it.marker.setLatLng(pos.latlng);
-    it.done = elapsed >= it.v.route.minutes;
+    const elapsed = fp.nowMin - it.routeStartMin;
+    const pos = positionAt(it.segs, Math.min(elapsed, it.plan.route.minutes));
+    if (pos) {
+      it.pos = pos;
+      it.marker.setLatLng(pos.latlng);
+      if (pos.k !== it.drawnFromSeg && !it.done) drawFleetAhead(it, pos.k);
+    }
+    if (!it.done && elapsed >= it.plan.route.minutes) {
+      it.done = true;
+      it.layer?.remove();
+      fp.events.push({ min: fp.nowMin, kind: "ok", text: `${it.id} arrived at ${it.plan.destination.id}` });
+      renderFleetPlayPanel();
+    }
     all &&= it.done;
   }
-  $("clockTime").textContent = minuteTime(fp.nowMin);
-  $("clockHour").textContent = all ? "Fleet arrived" : "Fleet en route";
+  // Flood colours follow the clock, as in drive mode.
+  const stamp = Math.floor(fp.nowMin * 4);
+  if (stamp !== fp.lastFloodStamp && !floodBusy) {
+    fp.lastFloodStamp = stamp;
+    updateFloodAt(fp.nowMin);
+  }
+  if (!all && !fp.paused && !fp.replanning && fp.nowMin - fp.lastReplanMin >= REPLAN_EVERY_MIN) replanFleet(fp);
   if (all && !fp.finished) {
     fp.finished = true;
+    fp.events.push({ min: fp.nowMin, kind: "ok", text: `All vehicles arrived, ${fp.reroutes} re-route${fp.reroutes === 1 ? "" : "s"}` });
     renderFleetPlayPanel();
+    renderDriveTimeline(fp.nowMin);
   } else if (ts - fp.lastPanelTs > 200) {
     fp.lastPanelTs = ts;
     updateFleetLive();
+  }
+}
+
+/** Re-check every moving vehicle against the current flood forecast,
+ *  incidents and each other (congestion), like drive mode does for one. */
+async function replanFleet(fp) {
+  const moving = fp.items.filter((it) => !it.done && it.pos);
+  if (!moving.length) return;
+  fp.replanning = true;
+  const reqMin = fp.nowMin;
+  try {
+    const r = await post("/api/fleet/replan", {
+      depart_minutes: reqMin,
+      blocked_road_ids: fp.blocked.map((b) => b.road_id),
+      vehicles: moving.map((it) => ({
+        id: it.id,
+        mission: it.mission,
+        position: [it.pos.latlng.lng, it.pos.latlng.lat],
+        road_id: it.segs[it.pos.k].road_id,
+        follow_road_ids: it.segs.slice(it.pos.k).map((s) => s.road_id),
+        destination_id: it.plan.destination.id,
+      })),
+    });
+    if (state.fleetPlay !== fp) return;
+    const changed = [];
+    for (const res of r.vehicles) {
+      const it = fp.items.find((x) => x.id === res.id);
+      if (!it || it.done || !res.route) continue;
+      const prevDest = it.plan.destination.id;
+      it.plan = { ...it.plan, destination: res.destination, route: res.route, status: res.status };
+      it.segs = prepareRoute(res.route);
+      it.routeStartMin = reqMin;
+      it.drawnFromSeg = -1;
+      if (res.reroute?.changed) {
+        it.reroutes++;
+        fp.reroutes++;
+        const dest = res.destination.id !== prevDest ? ` Now heading to ${res.destination.id}.` : "";
+        fp.events.push({ min: reqMin, kind: "reroute", text: `${it.id} re-routed: ${res.reroute.reason}.${dest}` });
+        if (res.status !== "ok") {
+          fp.events.push({ min: reqMin, kind: "danger", text: `${it.id}: no safe route left, following the least-flooded one` });
+        }
+        changed.push(`${it.id}: ${res.reroute.reason}${dest ? ` (→ ${res.destination.id})` : ""}`);
+      }
+    }
+    if (changed.length) {
+      showToast(`Re-routed ${changed.length} vehicle${changed.length === 1 ? "" : "s"} at ${minuteTime(reqMin)}`, changed.join(" · "));
+      renderFleetPlayPanel();
+      renderFacilities();
+    }
+  } catch (e) {
+    fp.events.push({ min: reqMin, kind: "danger", text: `Fleet re-planning failed: ${e.message}` });
+    renderFleetPlayPanel();
+  } finally {
+    fp.replanning = false;
+    fp.lastReplanMin = reqMin;
   }
 }
 
@@ -1396,15 +1513,17 @@ function renderFleetPlayPanel() {
     <div class="result-head"><h2>Fleet ${fp.view === "coordinated" ? "(coordinated)" : "(uncoordinated)"}</h2></div>
     <div class="drive-card"><div class="drive-top">
       <div class="drive-state">${live}<span class="drive-clock" id="fClock"></span></div>
-      <div class="eta"><b id="fDone">0</b><span class="unit">/ ${fp.items.length} arrived</span></div>
+      <div class="eta"><b id="fDone">0</b><span class="unit">/ ${fp.items.length} arrived</span><span class="meta">${fp.reroutes} re-route${fp.reroutes === 1 ? "" : "s"}</span></div>
       <div class="progress"><span id="fProg"></span></div>
     </div></div>
     <ul class="fleet-rows">${fp.items
       .map(
-        (it) => `<li><span class="vnum" style="background:${it.color}">${it.v.id.slice(1)}</span>
-          <span class="badge sm ${it.v.destination.type}">${it.v.destination.id}</span>
-          <span class="name">${esc(shortName(it.v.destination.name))}</span>
-          <span class="num" id="f-${it.v.id}"></span></li>`
+        (it) => `<li><span class="vnum" style="background:${it.color}">${it.id.slice(1)}</span>
+          <span class="badge sm ${it.plan.destination.type}">${it.plan.destination.id}</span>
+          <span class="name">${esc(shortName(it.plan.destination.name))}</span>
+          ${it.reroutes ? `<span class="chip split">${it.reroutes}× re-routed</span>` : ""}
+          ${it.plan.status !== "ok" ? `<span class="chip cut_off">Over limit</span>` : ""}
+          <span class="num" id="f-${it.id}"></span></li>`
       )
       .join("")}</ul>
     <div class="drive-controls">${
@@ -1412,12 +1531,24 @@ function renderFleetPlayPanel() {
         ? `<button class="primary" id="fStop" style="grid-column:1/-1">Done</button>`
         : `<button class="secondary" id="fPause">${fp.paused ? "Resume" : "Pause"}</button><button class="secondary" id="fStop">Stop</button>`
     }</div>
-    ${fp.finished ? "" : speedPicker()}`;
+    ${
+      fp.finished
+        ? ""
+        : `${speedPicker()}
+      <button class="secondary rain-btn" id="fRain">${ICONS.rain}Rain burst: +${RAIN_BURST_MM} mm/h now</button>
+      <div class="alert warn" style="margin-top:-2px">${ICONS.info}<span><b>Report an incident:</b> click any road to mark it blocked. Every simulated minute the whole fleet is re-checked: a vehicle re-routes when a road ahead is blocked or will be over its flood limit when reached, keeping the jam rules.</span></div>`
+    }
+    <h3>Trip log</h3>
+    <ol class="events">${[...fp.events]
+      .reverse()
+      .map((e) => `<li class="${e.kind}"><time>${minuteTime(e.min)}</time><i class="ev-dot"></i><span>${esc(e.text)}</span></li>`)
+      .join("")}</ol>`;
   $("fPause")?.addEventListener("click", () => {
     fp.paused = !fp.paused;
     renderFleetPlayPanel();
   });
   $("fStop").addEventListener("click", stopFleetPlay);
+  $("fRain")?.addEventListener("click", rainBurst);
   bindSpeed($("result"));
   updateFleetLive();
 }
@@ -1425,27 +1556,35 @@ function renderFleetPlayPanel() {
 function updateFleetLive() {
   const fp = state.fleetPlay;
   if (!fp || !$("fClock")) return;
-  const elapsed = fp.nowMin - fp.startMin;
   $("fClock").textContent = minuteTime(fp.nowMin);
   $("fDone").textContent = fp.items.filter((it) => it.done).length;
-  const longest = Math.max(...fp.items.map((it) => it.v.route.minutes));
-  $("fProg").style.width = `${Math.min(100, (elapsed / longest) * 100)}%`;
-  for (const it of fp.items) {
-    const left = it.v.route.minutes - elapsed;
-    $(`f-${it.v.id}`).textContent = left <= 0 ? "Arrived" : `${left < 1 ? "<1" : Math.ceil(left)} min left`;
-  }
+  const lefts = fp.items.map((it) => Math.max(0, it.plan.route.minutes - (fp.nowMin - it.routeStartMin)));
+  const elapsed = fp.nowMin - fp.startMin;
+  const longest = elapsed + Math.max(...lefts);
+  $("fProg").style.width = `${Math.min(100, (elapsed / (longest || 1)) * 100)}%`;
+  fp.items.forEach((it, k) => {
+    const el = $(`f-${it.id}`);
+    if (el) el.textContent = it.done ? "Arrived" : `${lefts[k] < 1 ? "<1" : Math.ceil(lefts[k])} min left`;
+  });
 }
 
 function stopFleetPlay() {
   const fp = state.fleetPlay;
   if (!fp) return;
   clearInterval(fp.timer);
-  fp.items.forEach((it) => it.marker.remove());
+  fp.items.forEach((it) => {
+    it.marker.remove();
+    it.layer?.remove();
+  });
+  fp.blockLayer.remove();
   state.fleetPlay = null;
   document.body.classList.remove("driving");
   $("timeline").classList.remove("locked");
-  renderTimeline();
-  renderFleet();
+  $("slider").step = "1";
+  $("toast").hidden = true;
+  // Back to the hour the fleet stopped at; the rain may have changed.
+  state.frames.clear();
+  goToTick(Math.min(Math.floor(fp.nowMin / stepMin()), state.info.total_ticks));
 }
 
 /* =================== Scenario & layers =================== */
@@ -1536,7 +1675,7 @@ async function init() {
 
   map.on("click", (ev) => {
     if (state.drive) reportIncident(ev.latlng);
-    else if (state.fleetPlay) return;
+    else if (state.fleetPlay) reportIncident(ev.latlng);
     else if (state.fleetMode) addVehicle(ev.latlng);
     else setOrigin(ev.latlng);
   });

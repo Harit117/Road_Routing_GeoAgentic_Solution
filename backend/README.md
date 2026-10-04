@@ -180,6 +180,14 @@ POST /api/fleet/dispatch
 In the map app, switch to **Fleet**, click roads to place up to 8 vehicles,
 compare the Coordinated / Uncoordinated tabs, and press **Play fleet**.
 
+During **Play fleet** the fleet is re-checked live, like single-vehicle drive
+mode: every simulated minute `POST /api/fleet/replan` re-plans each moving
+vehicle (medical first, against the others' remaining routes so the jam rules
+still hold). A vehicle re-routes when a road ahead is blocked or will be over
+its flood limit when reached; it changes facility only if its own can no longer
+be reached safely. Click a road to report an incident; **Rain burst** pours
+heavier rain than forecast. Flood colours follow the trip clock.
+
 ## API
 
 | Method | Path | Purpose |
@@ -206,6 +214,7 @@ compare the Coordinated / Uncoordinated tabs, and press **Play fleet**.
 | POST | `/api/route` | Flood-aware route and mid-trip replanning, see below |
 | GET | `/api/snap?lon=&lat=` | Nearest road to a point |
 | POST | `/api/fleet/dispatch` | Route several vehicles, splitting them in flood zones (see Fleet dispatch) |
+| POST | `/api/fleet/replan` | Live re-check of a driving fleet (positions, routes being followed, incidents) |
 | GET | `/api/fleet/rules` | Congestion rules in use |
 
 ### Routing handoff: Flood & Risk Engineer (Member 2) → Routing Engineer (Member 3)

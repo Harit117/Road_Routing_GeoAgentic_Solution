@@ -95,6 +95,19 @@ class VehicleRequest:
 
 
 @dataclass
+class MovingVehicle:
+    """A vehicle mid-trip: where it is now and the route it is driving."""
+
+    id: str
+    mission: MissionProfile
+    position: tuple[float, float]
+    road_id: str  # road it is on
+    follow_road_ids: list[str]  # rest of its route, starting with road_id
+    destination_id: str
+    forced: bool = False  # destination chosen by the user: never switched
+
+
+@dataclass
 class _Occupancy:
     """Who is on which physical road, and when (minutes after departure)."""
 
@@ -164,6 +177,84 @@ class FleetDispatcher:
                 "coordinated": self._evaluate(coordinated, ids),
                 "independent": self._evaluate(independent, ids),
             },
+        }
+
+    def replan(
+        self,
+        vehicles: list[MovingVehicle],
+        forecast: FloodForecast,
+        blocked_road_ids: list[str] | None = None,
+    ) -> dict:
+        """Re-check a fleet that is already driving (live, every few minutes).
+
+        Same flood logic as single-vehicle drive mode: each vehicle keeps its
+        route unless a road ahead will be over its flood limit when reached,
+        is blocked, or a clearly better route appeared. Vehicles are
+        re-checked medical-first against the others' remaining routes, so the
+        congestion rules keep holding while the fleet drives. A vehicle keeps
+        its facility unless that can no longer be reached safely.
+        """
+        order = sorted(
+            range(len(vehicles)),
+            key=lambda k: (MISSION_PRIORITY.get(vehicles[k].mission.id, 9), k),
+        )
+        occupancy = _Occupancy()
+        results = {}
+        for k in order:
+            v = vehicles[k]
+            wrapper = self._congestion(occupancy, forecast, v.id)
+            try:
+                plan = self.planner.plan(
+                    v.mission,
+                    v.position,
+                    forecast,
+                    v.destination_id,
+                    origin_road_id=v.road_id,
+                    follow_road_ids=v.follow_road_ids,
+                    blocked_road_ids=blocked_road_ids,
+                    edge_wrapper=wrapper,
+                )
+                if plan["status"] != "ok" and not v.forced:
+                    # Own facility no longer reachable within the flood limit:
+                    # look for one that is (safety beats proximity).
+                    other = self.planner.plan(
+                        v.mission,
+                        v.position,
+                        forecast,
+                        None,
+                        origin_road_id=v.road_id,
+                        blocked_road_ids=blocked_road_ids,
+                        edge_wrapper=wrapper,
+                    )
+                    if other["status"] == "ok" and other["destination"]["id"] != v.destination_id:
+                        other["reroute"] = {
+                            "changed": True,
+                            "reason": (
+                                f"{v.destination_id} can no longer be reached within the flood limit; "
+                                f"heading to {other['destination']['id']}"
+                            ),
+                        }
+                        plan = other
+            except PlanningError as e:
+                raise PlanningError(f"{v.id}: {e}") from e
+            results[v.id] = plan
+            for start, end, phys in self._occupied(plan):
+                occupancy.add(phys, start, end, v.id)
+
+        return {
+            "routing_order": [vehicles[k].id for k in order],
+            "vehicles": [
+                {
+                    "id": v.id,
+                    "mission": results[v.id]["mission"],
+                    "status": results[v.id]["status"],
+                    "destination": results[v.id]["destination"],
+                    "route": results[v.id]["route"],
+                    "reroute": results[v.id]["reroute"],
+                    "warnings": results[v.id]["warnings"],
+                }
+                for v in vehicles
+            ],
         }
 
     # ---------- routing ----------
