@@ -152,6 +152,13 @@ fleet so that does not happen.
   pays `overflow_penalty` (3x per extra vehicle) for using a road already at
   its zone cap, so it is split onto another route or another facility when a
   reasonable one exists. Congestion never closes a road, so nobody is stranded.
+* Congestion changes the **route, not the destination**. Each vehicle keeps
+  the facility it would choose alone, unless another one is faster in
+  **jam-adjusted time** (drive minutes + expected jam delay from vehicles
+  already routed) by at least `switch_min_minutes` (2) **and**
+  `switch_min_fraction` (15%), or its own facility is only reachable over the
+  flood limit while another is reachable within it. Each coordinated vehicle
+  carries a `destination_decision` with both times and the reason.
 * Every response holds both `plans.coordinated` and `plans.independent`
   (everyone routes alone) and a `report` for each: roads over cap, metres over
   cap, an estimated jam delay (`jam_delay_factor`), average and slowest drive.

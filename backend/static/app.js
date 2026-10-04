@@ -1254,10 +1254,13 @@ function renderFleetResult() {
   const I = P.report.independent;
   const C = P.report.coordinated;
   const split = P.plans.coordinated.filter((v) => v.changed).length;
+  const switched = P.plans.coordinated.filter((v) => v.destination_decision?.switched).length;
   let verdict;
   if (I.overloaded_roads === 0) verdict = `<span class="verdict clear">${ICONS.check}No jam risk: routes only share safe roads</span>`;
   else if (C.overloaded_roads < I.overloaded_roads)
-    verdict = `<span class="verdict detour">${ICONS.detour}Split ${split} vehicle${split === 1 ? "" : "s"} to avoid ${I.overloaded_roads - C.overloaded_roads} jam road${I.overloaded_roads - C.overloaded_roads === 1 ? "" : "s"}</span>`;
+    verdict = `<span class="verdict detour">${ICONS.detour}Re-routed ${split} vehicle${split === 1 ? "" : "s"} to avoid ${I.overloaded_roads - C.overloaded_roads} jam road${I.overloaded_roads - C.overloaded_roads === 1 ? "" : "s"}${
+      switched ? ` · ${switched} changed hospital` : ""
+    }</span>`;
   else verdict = `<span class="verdict over">${ICONS.alert}Jam unavoidable on ${C.overloaded_roads} road${C.overloaded_roads === 1 ? "" : "s"}</span>`;
 
   const better = (a, b) => (a < b ? "win" : "");
@@ -1277,7 +1280,7 @@ function renderFleetResult() {
         ${row("Average drive", C.mean_minutes, I.mean_minutes, minutes)}
         ${row("Slowest vehicle", C.max_minutes, I.max_minutes, minutes)}
       </table></div>
-      <div class="hero-exp"><span class="muted" style="font-size:12px">Orange zone (High hazard, or ≥${pct(rules.orange_loading)} loading) allows ${rules.orange_cap} vehicles at a time; red (Very High, or ≥${pct(rules.red_loading)}) allows ${rules.red_cap}. "At a time" = within ±${rules.window_min} min. Medical vehicles are routed first.</span></div>
+      <div class="hero-exp"><span class="muted" style="font-size:12px">Orange zone (High hazard, or ≥${pct(rules.orange_loading)} loading) allows ${rules.orange_cap} vehicles at a time; red (Very High, or ≥${pct(rules.red_loading)}) allows ${rules.red_cap}. "At a time" = within ±${rules.window_min} min. Medical vehicles are routed first. Congestion changes the route, not the hospital: a vehicle only switches if another is faster with jams counted by ≥${rules.switch_min_minutes} min and ≥${pct(rules.switch_min_fraction)}, or its own is only reachable over the flood limit.</span></div>
     </div>
     <div class="tabs" role="tablist">
       <button role="tab" data-view="coordinated" aria-selected="${state.fleetView === "coordinated"}">Coordinated</button>
@@ -1286,16 +1289,18 @@ function renderFleetResult() {
     <ul class="fleet-rows">${view
       .map((v) => {
         const color = state.fleet.find((x) => x.id === v.id)?.color;
-        const chip =
-          v.status !== "ok"
-            ? `<span class="chip cut_off">${v.status === "no_safe_route" ? "Over limit" : "No route"}</span>`
-            : state.fleetView === "coordinated" && v.changed
-              ? `<span class="chip split">Split${v.extra_minutes > 0.05 ? ` +${v.extra_minutes.toFixed(1)} min` : ""}</span>`
-              : "";
-        return `<li><span class="vnum" style="background:${color}">${v.id.slice(1)}</span>
+        const d = state.fleetView === "coordinated" ? v.destination_decision : null;
+        const chips = [];
+        if (v.status !== "ok") chips.push(`<span class="chip cut_off">${v.status === "no_safe_route" ? "Over limit" : "No route"}</span>`);
+        if (d?.switched) chips.push(`<span class="chip site_flooded">${d.home}→${d.chosen}</span>`);
+        else if (state.fleetView === "coordinated" && v.changed)
+          chips.push(`<span class="chip split">Re-routed${v.extra_minutes > 0.05 ? ` +${v.extra_minutes.toFixed(1)} min` : ""}</span>`);
+        return `<li title="${esc(d?.reason || "")}"><span class="vnum" style="background:${color}">${v.id.slice(1)}</span>
           ${v.destination ? `<span class="badge sm ${v.destination.type}">${v.destination.id}</span>` : ""}
-          <span class="name">${esc(v.destination ? shortName(v.destination.name) : "No destination")}</span>
-          ${chip}<span class="num">${v.route ? `${fmtMin(v.route.minutes)} min` : "–"}</span></li>`;
+          <span class="name">${esc(v.destination ? shortName(v.destination.name) : "No destination")}${
+            d && (d.switched || d.alternative) ? `<small class="muted" style="display:block;font-size:11.5px;white-space:normal">${esc(d.reason)}</small>` : ""
+          }</span>
+          ${chips.join("")}<span class="num">${v.route ? `${fmtMin(v.route.minutes)} min` : "–"}</span></li>`;
       })
       .join("")}</ul>
     <div class="start-trip"><button class="primary" id="playFleet"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Play fleet</button></div>

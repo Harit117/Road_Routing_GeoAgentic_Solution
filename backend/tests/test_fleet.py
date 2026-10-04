@@ -98,3 +98,38 @@ def test_fleet_request_validation(client):
     far = client.post("/api/fleet/dispatch", json={"vehicles": [{"mission": "medical", "origin": [80.30, 13.10]}]})
     assert far.status_code == 422 and far.json()["detail"].startswith("V1:")
     assert client.get("/api/fleet/rules").json()["red_cap"] == 1
+
+
+EIGHT = CLUSTER + [[80.2118, 12.9802], [80.2100, 12.9780], [80.2140, 12.9795]]
+
+
+def test_congestion_changes_route_not_hospital(client):
+    body = dispatch(client, tick=5, points=EIGHT)
+    own = {v["id"]: v["destination"]["id"] for v in body["plans"]["independent"]}
+    for v in body["plans"]["coordinated"]:
+        d = v["destination_decision"]
+        assert d["home"] == own[v["id"]]
+        if v["destination"]["id"] != own[v["id"]]:
+            # Only allowed with a real, recorded saving above both margins.
+            assert d["switched"] and d["saving_min"] >= d["needed_min"]
+    # The fleet still gets the jam benefit from re-routing alone.
+    assert body["report"]["coordinated"]["estimated_jam_delay_min"] < body["report"]["independent"]["estimated_jam_delay_min"]
+
+
+def test_hospital_switch_needs_clear_saving(client):
+    rules = CongestionRules()
+    for tick in (5, 6):
+        for v in dispatch(client, tick=tick, points=EIGHT)["plans"]["coordinated"]:
+            d = v["destination_decision"]
+            if d and d["switched"] and "saving_min" in d:
+                needed = max(rules.switch_min_minutes, rules.switch_min_fraction * (d["home_minutes"] + d["home_jam_delay_min"]))
+                assert d["saving_min"] >= needed - 1e-6
+                assert v["destination"]["id"] == d["chosen"] != d["home"]
+
+
+def test_forced_facility_is_never_switched(client):
+    r = client.post(
+        "/api/fleet/dispatch",
+        json={"vehicles": [{"mission": "medical", "origin": p, "facility_id": "H3"} for p in CLUSTER], "depart_tick": 5},
+    ).json()
+    assert {v["destination"]["id"] for v in r["plans"]["coordinated"]} == {"H3"}

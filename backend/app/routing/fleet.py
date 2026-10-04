@@ -12,6 +12,11 @@ the rest for a long time. So:
   a heavy cost for squeezing past the cap, so it is split onto another route
   when a reasonable one exists. Roads are never closed by congestion alone,
   so no vehicle is stranded.
+* Congestion changes the route, not the destination: each vehicle keeps the
+  facility it would pick alone, unless another one is faster in jam-adjusted
+  time (drive + expected jam delay) by at least switch_min_minutes AND
+  switch_min_fraction, or its own facility is only reachable over the flood
+  limit while another is not.
 
 Every dispatch also routes the fleet independently (no coordination) so the
 two plans can be compared.
@@ -42,8 +47,14 @@ class CongestionRules:
     window_min: float = 2.0
     # Cost multiplier added per vehicle over the cap (soft, never a closure).
     overflow_penalty: float = 3.0
-    # For the report only: estimated slowdown per extra vehicle in a jam.
+    # Estimated slowdown per extra vehicle in a jam: share of the road's
+    # drive time added (used for jam-adjusted ETAs and the report).
     jam_delay_factor: float = 0.5
+    # Congestion re-routes a vehicle; it does not send it to a different
+    # facility unless that is clearly faster once jams are counted: the other
+    # facility's jam-adjusted time must beat its own by BOTH margins.
+    switch_min_minutes: float = 2.0
+    switch_min_fraction: float = 0.15
 
     def zone(self, hazard_rank: int, loading: float) -> str | None:
         if hazard_rank >= self.red_hazard_rank or loading >= self.red_loading:
@@ -114,11 +125,13 @@ class FleetDispatcher:
         )
         independent = {}
         coordinated = {}
+        decisions = {}
         occupancy = _Occupancy()
         for k in order:
             v = vehicles[k]
-            independent[v.id] = self._plan(v, forecast, blocked_road_ids, None)
-            plan = self._plan(v, forecast, blocked_road_ids, self._congestion(occupancy, forecast, v.id))
+            alone = self._plan(v, forecast, blocked_road_ids, None)
+            independent[v.id] = alone
+            plan, decisions[v.id] = self._coordinated_plan(v, alone, forecast, blocked_road_ids, occupancy)
             coordinated[v.id] = plan
             for start, end, phys in self._occupied(plan):
                 occupancy.add(phys, start, end, v.id)
@@ -128,8 +141,10 @@ class FleetDispatcher:
             "rules": asdict(self.rules),
             "routing_order": [vehicles[k].id for k in order],
             "plans": {
-                "coordinated": [self._vehicle(vid, coordinated[vid], independent[vid]) for vid in ids],
-                "independent": [self._vehicle(vid, independent[vid], independent[vid]) for vid in ids],
+                "coordinated": [
+                    self._vehicle(vid, coordinated[vid], independent[vid], decisions[vid]) for vid in ids
+                ],
+                "independent": [self._vehicle(vid, independent[vid], independent[vid], None) for vid in ids],
             },
             "report": {
                 "coordinated": self._evaluate(coordinated, ids),
@@ -139,18 +154,107 @@ class FleetDispatcher:
 
     # ---------- routing ----------
 
-    def _plan(self, v: VehicleRequest, forecast, blocked, wrapper) -> dict:
+    def _plan(self, v: VehicleRequest, forecast, blocked, wrapper, facility_id=None) -> dict:
         try:
             return self.planner.plan(
                 v.mission,
                 v.origin,
                 forecast,
-                v.facility_id,
+                facility_id or v.facility_id,
                 blocked_road_ids=blocked,
                 edge_wrapper=wrapper,
             )
         except PlanningError as e:
             raise PlanningError(f"{v.id}: {e}") from e
+
+    def _coordinated_plan(self, v, alone: dict, forecast, blocked, occupancy: "_Occupancy"):
+        """Re-route around jams, keeping the vehicle's own facility unless
+        another one is clearly faster once expected jam delay is counted."""
+        wrapper = self._congestion(occupancy, forecast, v.id)
+        home = alone.get("destination")
+        if v.facility_id or home is None:
+            # Destination forced by the user, or none reachable at all.
+            return self._plan(v, forecast, blocked, wrapper), None
+
+        to_home = self._plan(v, forecast, blocked, wrapper, facility_id=home["id"])
+        best = self._plan(v, forecast, blocked, wrapper)
+        home_eff = self._jam_adjusted(to_home, occupancy, v.id)
+        decision = {
+            "home": home["id"],
+            "chosen": home["id"],
+            "switched": False,
+            "home_minutes": home_eff["minutes"],
+            "home_jam_delay_min": home_eff["jam_delay"],
+            "alternative": None,
+            "reason": f"Kept {home['id']}: congestion only changes the route",
+        }
+        alt = best.get("destination")
+        if alt is None or alt["id"] == home["id"] or not best.get("route"):
+            return to_home, decision
+
+        alt_eff = self._jam_adjusted(best, occupancy, v.id)
+        if to_home["status"] != "ok" and best["status"] == "ok":
+            # Safety beats proximity: the own facility is only reachable over
+            # the flood limit, the other one within it.
+            decision.update(
+                chosen=alt["id"],
+                switched=True,
+                alternative=alt["id"],
+                alt_minutes=alt_eff["minutes"],
+                alt_jam_delay_min=alt_eff["jam_delay"],
+                reason=f"Switched to {alt['id']}: {home['id']} is only reachable over the flood limit",
+            )
+            return best, decision
+        if best["status"] != "ok" and to_home["status"] == "ok":
+            return to_home, decision
+        saving = home_eff["total"] - alt_eff["total"]
+        needed = max(self.rules.switch_min_minutes, self.rules.switch_min_fraction * home_eff["total"])
+        decision.update(
+            alternative=alt["id"],
+            alt_minutes=alt_eff["minutes"],
+            alt_jam_delay_min=alt_eff["jam_delay"],
+            saving_min=round(saving, 2),
+            needed_min=round(needed, 2),
+        )
+        if saving >= needed:
+            decision.update(
+                chosen=alt["id"],
+                switched=True,
+                reason=(
+                    f"Switched to {alt['id']}: {alt_eff['total']:.1f} min vs {home_eff['total']:.1f} min "
+                    f"to {home['id']} with jams, saves {saving:.1f} min (needs {needed:.1f})"
+                ),
+            )
+            return best, decision
+        decision["reason"] = (
+            f"Kept {home['id']}: {alt['id']} would save only {saving:.1f} min (needs {needed:.1f})"
+            if saving > 0
+            else f"Kept {home['id']}: {alt['id']} is not faster ({alt_eff['total']:.1f} vs {home_eff['total']:.1f} min with jams)"
+        )
+        return to_home, decision
+
+    def _jam_adjusted(self, plan: dict, occupancy: "_Occupancy", vid: str) -> dict:
+        """Drive time plus the delay expected from vehicles already routed."""
+        route = plan.get("route")
+        if not route:
+            return {"minutes": None, "jam_delay": None, "total": float("inf")}
+        roads = self.planner.graph.network.roads
+        delay = 0.0
+        for s in route["segments"]:
+            i = self._index[s["road_id"]]
+            zone = self.rules.zone(roads[i].hazard_rank, s["loading"])
+            if zone is None:
+                continue
+            start = s["enter_min"]
+            sharing = occupancy.count(self._physical[i], start, start + s["minutes"], self.rules.window_min, exclude=vid)
+            excess = sharing + 1 - self.rules.cap(zone)
+            if excess > 0:
+                delay += s["minutes"] * self.rules.jam_delay_factor * excess
+        return {
+            "minutes": round(route["minutes"], 2),
+            "jam_delay": round(delay, 2),
+            "total": route["minutes"] + delay,
+        }
 
     def _congestion(self, occupancy: _Occupancy, forecast: FloodForecast, vid: str):
         rules = self.rules
@@ -248,7 +352,7 @@ class FleetDispatcher:
         }
 
     @staticmethod
-    def _vehicle(vid: str, plan: dict, baseline: dict) -> dict:
+    def _vehicle(vid: str, plan: dict, baseline: dict, decision: dict | None) -> dict:
         route = plan.get("route")
         base = baseline.get("route")
         return {
@@ -262,4 +366,6 @@ class FleetDispatcher:
             # Minutes this vehicle gives up so the fleet avoids jams.
             "extra_minutes": round(route["minutes"] - base["minutes"], 2) if route and base else None,
             "changed": bool(route and base and route["road_ids"] != base["road_ids"]),
+            # Why this facility: own one kept, or switched because clearly faster.
+            "destination_decision": decision,
         }
