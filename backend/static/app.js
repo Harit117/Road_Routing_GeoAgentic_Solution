@@ -1143,23 +1143,44 @@ function scheduleFleet(immediate = false) {
   fleetPlanTimer = setTimeout(dispatchFleet, immediate ? 0 : 150);
 }
 
+// At most one fleet re-plan in flight. Dragging the timeline fires many
+// changes; stacking requests made the server answer all of them late, so the
+// fleet looked frozen. Extra changes just mark "pending": when the current
+// request returns, its result is shown and one more re-plan runs for the
+// latest hour and vehicles.
+let fleetInFlight = false;
+let fleetPending = false;
+
 async function dispatchFleet() {
-  const seq = ++state.fleetSeq;
+  if (fleetInFlight) {
+    fleetPending = true;
+    return;
+  }
+  fleetInFlight = true;
+  fleetPending = false;
   state.fleetPlanning = true;
   state.fleetError = null;
   renderFleetResult();
+  let result = null;
+  let error = null;
   try {
-    const result = await post("/api/fleet/dispatch", {
+    result = await post("/api/fleet/dispatch", {
       vehicles: state.fleet.map((v) => ({ id: v.id, mission: v.mission, origin: v.origin })),
       depart_tick: state.tick,
     });
-    if (seq !== state.fleetSeq || !state.fleetMode) return;
-    state.fleetPlan = result;
   } catch (e) {
-    if (seq !== state.fleetSeq) return;
-    state.fleetPlan = null;
-    state.fleetError = e.message;
+    error = e.message;
+  } finally {
+    fleetInFlight = false;
   }
+  if (!state.fleetMode || state.fleetPlay) return;
+  if (fleetPending && state.fleet.length) {
+    if (result) state.fleetPlan = result; // show the in-between hour meanwhile
+    renderFleet();
+    return dispatchFleet();
+  }
+  state.fleetPlan = error ? null : result;
+  state.fleetError = error;
   state.fleetPlanning = false;
   renderFleet();
 }

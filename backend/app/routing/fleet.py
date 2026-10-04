@@ -213,6 +213,7 @@ class FleetDispatcher:
                     follow_road_ids=v.follow_road_ids,
                     blocked_road_ids=blocked_road_ids,
                     edge_wrapper=wrapper,
+                    compare_fastest=False,
                 )
                 if plan["status"] != "ok" and not v.forced:
                     # Own facility no longer reachable within the flood limit:
@@ -225,6 +226,7 @@ class FleetDispatcher:
                         origin_road_id=v.road_id,
                         blocked_road_ids=blocked_road_ids,
                         edge_wrapper=wrapper,
+                        compare_fastest=False,
                     )
                     if other["status"] == "ok" and other["destination"]["id"] != v.destination_id:
                         other["reroute"] = {
@@ -268,6 +270,7 @@ class FleetDispatcher:
                 facility_id or v.facility_id,
                 blocked_road_ids=blocked,
                 edge_wrapper=wrapper,
+                compare_fastest=False,  # the fleet never shows it; saves an A* per facility
             )
         except PlanningError as e:
             raise PlanningError(f"{v.id}: {e}") from e
@@ -329,6 +332,10 @@ class FleetDispatcher:
         }
         if v.facility_id:
             return to_home, decision  # destination forced by the user
+        if direct["jam_delay"] == 0:
+            # No jam on its own route: congestion can only make other
+            # facilities look worse, so its own is still the best one.
+            return to_home, decision
 
         best = self._plan(v, forecast, blocked, wrapper)
         alt = best.get("destination")

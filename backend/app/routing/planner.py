@@ -4,7 +4,7 @@ with flood-aware A*, and compare against the plain fastest route."""
 from dataclasses import dataclass
 from typing import Callable
 
-from app.routing.astar import EdgeFn, SearchResult, Start, astar
+from app.routing.astar import EdgeFn, SearchResult, Start, astar, search_many
 from app.routing.facilities import Facility
 from app.routing.forecast import FloodForecast
 from app.routing.geo import split_line
@@ -69,9 +69,12 @@ class Planner:
         follow_road_ids: list[str] | None = None,
         blocked_road_ids: list[str] | None = None,
         edge_wrapper: Callable[[EdgeFn], EdgeFn] | None = None,
+        compare_fastest: bool = True,
     ) -> dict:
         """`edge_wrapper` lets a caller add cost to roads (fleet congestion);
-        it must only ever increase costs, which keeps the A* heuristic valid."""
+        it must only ever increase costs, which keeps the A* heuristic valid.
+        `compare_fastest=False` skips the plain fastest-route comparison
+        (an extra A* per facility) for callers that do not show it."""
         wrap = edge_wrapper or (lambda e: e)
         # Reported incidents (fallen tree, stalled vehicle...) close a road in
         # both directions, for every route including the plain fastest one.
@@ -106,9 +109,10 @@ class Planner:
         starts, prefixes = self._starts(snap, forecast, mission)
         edge = wrap(_without(blocked, mission_edge(mission, self.graph, forecast)))
 
+        reach = self._search(starts, candidates, edge)
         options = []
         for fac in candidates:
-            found = astar(self.graph, starts, fac.node_id, edge)
+            found = reach.get(fac.node_id)
             option = {"facility": fac, "result": found, "state": "cut_off"}
             if found is not None:
                 site = self._site_loading(fac, forecast, found.minutes)
@@ -124,11 +128,12 @@ class Planner:
             # an answer: fall back to the least-flooded route, clearly flagged.
             status = "no_safe_route"
             soft = wrap(_without(blocked, mission_edge(mission, self.graph, forecast, closures=False)))
-            fallback = []
-            for fac in candidates:
-                found = astar(self.graph, starts, fac.node_id, soft)
-                if found is not None:
-                    fallback.append({"facility": fac, "result": found})
+            soft_reach = self._search(starts, candidates, soft)
+            fallback = [
+                {"facility": fac, "result": soft_reach[fac.node_id]}
+                for fac in candidates
+                if fac.node_id in soft_reach
+            ]
             best = min(fallback, key=lambda o: o["result"].cost) if fallback else None
             if best is None:
                 status = "unreachable"
@@ -159,17 +164,18 @@ class Planner:
                 reroute = {"changed": False, "reason": None}
 
         # The route an ordinary navigator would take, ignoring floods entirely.
-        fast_starts, _ = self._starts(snap, forecast, None)
         fastest_to = {}
-        for o in options:
-            fastest_to[o["facility"].id] = astar(
-                self.graph, fast_starts, o["facility"].node_id, _without(blocked, fastest_edge(self.graph))
+        target = None
+        if compare_fastest:
+            fast_starts, _ = self._starts(snap, forecast, None)
+            fast_reach = self._search(fast_starts, candidates, _without(blocked, fastest_edge(self.graph)))
+            for o in options:
+                fastest_to[o["facility"].id] = fast_reach.get(o["facility"].node_id)
+            target = best["facility"] if best else min(
+                (o["facility"] for o in options if fastest_to[o["facility"].id]),
+                key=lambda f: fastest_to[f.id].minutes,
+                default=None,
             )
-        target = best["facility"] if best else min(
-            (o["facility"] for o in options if fastest_to[o["facility"].id]),
-            key=lambda f: fastest_to[f.id].minutes,
-            default=None,
-        )
 
         start_road = self.graph.network.roads[snap.road_index]
         start_loading = forecast.loading(snap.road_index, 0)
@@ -216,6 +222,16 @@ class Planner:
             ),
             "warnings": warnings,
         }
+
+    def _search(self, starts, candidates: list[Facility], edge: EdgeFn) -> dict[int, SearchResult]:
+        """Best path to every candidate facility node: A* for one target,
+        a single multi-target search for several (same optimal results)."""
+        nodes = {f.node_id for f in candidates}
+        if len(nodes) == 1:
+            (node,) = nodes
+            found = astar(self.graph, starts, node, edge)
+            return {node: found} if found else {}
+        return search_many(self.graph, starts, nodes, edge)
 
     def _starts(self, snap: Snap, fc: FloodForecast, mission: MissionProfile | None):
         """A start can be mid-road: drive the rest of it toward v, or, on a

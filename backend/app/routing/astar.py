@@ -31,6 +31,55 @@ class SearchResult:
     expanded: int = 0
 
 
+def search_many(graph: RoutingGraph, starts: list[Start], goals: set[int], edge: EdgeFn) -> dict[int, SearchResult]:
+    """One time-dependent Dijkstra search that settles every goal at once.
+
+    Gives the same optimal results as one A* per goal, but explores the
+    graph once instead of once per facility. Stops when all goals are settled.
+    """
+    roads = graph.network.roads
+    g: dict[int, float] = {}
+    minutes: dict[int, float] = {}
+    came_from: dict[int, tuple[int, int] | Start] = {}
+    heap = []
+    for s in starts:
+        if s.cost < g.get(s.node, float("inf")):
+            g[s.node] = s.cost
+            minutes[s.node] = s.minutes
+            came_from[s.node] = s
+            heapq.heappush(heap, (s.cost, s.node))
+
+    remaining = set(goals)
+    found: dict[int, SearchResult] = {}
+    closed = set()
+    while heap and remaining:
+        cost, node = heapq.heappop(heap)
+        if node in closed or cost > g[node]:
+            continue
+        closed.add(node)
+        if node in remaining:
+            remaining.discard(node)
+            path, cur = [], node
+            while not isinstance(came_from[cur], Start):
+                cur, road_index = came_from[cur]
+                path.append(road_index)
+            path.reverse()
+            found[node] = SearchResult(came_from[cur], path, g[node], minutes[node], len(closed))
+        for i in graph.out[node]:
+            result = edge(i, minutes[node])
+            if result is None:
+                continue
+            edge_cost, edge_minutes = result
+            nxt = roads[i].v
+            new_cost = cost + edge_cost
+            if new_cost < g.get(nxt, float("inf")):
+                g[nxt] = new_cost
+                minutes[nxt] = minutes[node] + edge_minutes
+                came_from[nxt] = (node, i)
+                heapq.heappush(heap, (new_cost, nxt))
+    return found
+
+
 def astar(graph: RoutingGraph, starts: list[Start], goal: int, edge: EdgeFn) -> SearchResult | None:
     nodes = graph.network.nodes
     roads = graph.network.roads

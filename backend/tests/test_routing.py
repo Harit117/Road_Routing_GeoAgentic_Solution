@@ -178,3 +178,26 @@ def test_snap_finds_clicked_road(client):
     body = client.get("/api/snap", params={"lon": ORIGIN[0], "lat": ORIGIN[1]}).json()
     assert body["name"] == "2nd Main Road" and body["coords"]
     assert client.get("/api/snap", params={"lon": 80.30, "lat": 13.10}).status_code == 404
+
+
+def test_multi_target_search_matches_astar_per_facility():
+    from app.routing.astar import search_many
+    from app.routing.forecast import FloodForecast, forecast_frames
+    from app.routing.missions import MISSIONS
+    from app.routing.planner import mission_edge
+
+    with TestClient(app):
+        planner = app.state.planner
+        graph = planner.graph
+        fc = FloodForecast(forecast_frames(app.state.simulation), app.state.simulation.step_minutes, 5)
+        edge = mission_edge(MISSIONS["medical"], graph, fc)
+        goals = {f.node_id for f in planner.facilities.values() if f.type == "hospital"}
+        nodes = list(graph.network.nodes)
+        for origin in (nodes[10], nodes[900], nodes[2200]):
+            starts = [Start(origin, 0.0, 0.0)]
+            many = search_many(graph, starts, goals, edge)
+            for goal in goals:
+                one = astar(graph, starts, goal, edge)
+                assert (one is None) == (goal not in many)
+                if one:
+                    assert many[goal].cost == pytest.approx(one.cost)
