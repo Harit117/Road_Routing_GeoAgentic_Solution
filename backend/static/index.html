@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <aside id="panel">
@@ -24,12 +24,22 @@
       </div>
     </header>
 
+    <div class="mode-switch plan-only" role="tablist" aria-label="Planning mode">
+      <button role="tab" data-mode="single" aria-selected="true">Single vehicle</button>
+      <button role="tab" data-mode="fleet" aria-selected="false">Fleet</button>
+    </div>
+
     <section class="block plan-only">
-      <h2>Mission</h2>
+      <h2 id="missionTitle">Mission</h2>
       <div id="missions" class="missions" role="radiogroup" aria-label="Mission type"></div>
     </section>
 
-    <section class="block plan-only">
+    <section class="block plan-only fleet-only">
+      <div class="fleet-head"><h2>Fleet</h2><button class="link" id="fleetClear" hidden>Clear all</button></div>
+      <div id="fleetList"></div>
+    </section>
+
+    <section class="block plan-only single-only">
       <h2>Trip</h2>
       <div class="trip">
         <div class="trip-row" id="startRow">
@@ -116,6 +126,6 @@
   </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

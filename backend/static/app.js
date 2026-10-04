@@ -57,6 +57,15 @@ const state = {
   tab: "directions",
   drive: null, // active trip, see "Drive mode"
   speed: 30, // playback: simulated seconds per real second
+  // Fleet mode (see "Fleet mode")
+  fleetMode: false,
+  fleet: [], // [{id, mission, origin: [lon, lat]}]
+  fleetPlan: null, // last /api/fleet/dispatch response
+  fleetView: "coordinated",
+  fleetSeq: 0,
+  fleetPlanning: false,
+  fleetError: null,
+  fleetPlay: null,
 };
 const currentMission = () => state.missions.find((m) => m.id === state.mission);
 
@@ -107,7 +116,7 @@ function roadColor(i) {
 }
 
 function restyleRoads() {
-  const opacity = state.plan?.route || state.drive ? 0.28 : 0.85;
+  const opacity = state.plan?.route || state.drive || state.fleetPlan ? 0.28 : 0.85;
   for (let i = 0; i < roadLayers.length; i++) roadLayers[i].setStyle({ color: roadColor(i), opacity });
   renderLegend();
 }
@@ -123,7 +132,9 @@ function renderLegend() {
   let html = `<div class="lg-title">${title}</div><div class="lg-row">${items
     .map(([c, label]) => `<span><i class="swatch" style="background:${c}"></i>${label}</span>`)
     .join("")}</div>`;
-  if (state.drive) {
+  if (state.fleetMode && state.fleetPlan) {
+    html += `<div class="lg-row"><span><i class="line-key" style="border-top:4px solid #64748b;border-radius:2px"></i>Vehicle routes (one colour each)</span><span><i class="line-key" style="border-top:4px dashed #111827"></i>Jam: over zone cap</span></div>`;
+  } else if (state.drive) {
     html += `<div class="lg-row"><span><i class="line-key route"></i>Route ahead</span><span><i class="line-key" style="border-top:4px solid #64748b;border-radius:2px"></i>Driven</span></div>`;
   } else if (state.plan?.route) {
     html += `<div class="lg-row"><span><i class="line-key route"></i>Flood-aware route</span>${
@@ -244,10 +255,15 @@ function facilityStatus(f) {
 function renderFacilities() {
   const mission = currentMission();
   const destId = state.drive ? state.drive.dest?.id : state.plan?.destination?.id;
+  const fleetDests = new Set(
+    state.fleetMode && state.fleetPlan ? fleetVehicles().map((v) => v.destination?.id).filter(Boolean) : []
+  );
+  const fleetTypes = new Set(state.fleet.map((v) => state.missions.find((m) => m.id === v.mission)?.facility_type));
   for (const f of state.facilities) {
     const status = facilityStatus(f);
-    const active = f.type === mission?.facility_type;
-    const cls = ["fac", active ? "" : "dim", f.id === destId ? "dest" : "", status !== "safe" ? `flood-${status}` : ""].join(" ");
+    const active = state.fleetMode && state.fleet.length ? fleetTypes.has(f.type) : f.type === mission?.facility_type;
+    const isDest = state.fleetMode ? fleetDests.has(f.id) : f.id === destId;
+    const cls = ["fac", active ? "" : "dim", isDest ? "dest" : "", status !== "safe" ? `flood-${status}` : ""].join(" ");
     const html = `<div class="${cls}"><div class="fac-icon ${f.type}">${ICONS[f.type]}</div><span class="fac-id">${f.id}</span></div>`;
     let marker = facilityMarkers.get(f.id);
     if (!marker) {
@@ -272,7 +288,7 @@ function renderFacilities() {
 
 function chooseFacility(id) {
   const f = state.facilities.find((x) => x.id === id);
-  if (!f || state.drive) return;
+  if (!f || state.drive || state.fleetMode) return;
   const mission = state.missions.find((m) => m.facility_type === f.type);
   if (mission && mission.id !== state.mission) setMission(mission.id, false);
   state.facilityId = id;
@@ -354,6 +370,7 @@ function clearOrigin() {
 /* =================== Planning =================== */
 let planTimer = null;
 function schedulePlan(immediate = false) {
+  if (state.fleetMode) return scheduleFleet(immediate);
   if (!state.origin || state.drive) return;
   if (immediate) state.fitPending = true; // a user choice: frame the new trip
   clearTimeout(planTimer);
@@ -443,6 +460,7 @@ function drawPlan() {
 
 /* =================== Result panel =================== */
 function renderResult() {
+  if (state.fleetMode) return renderFleetResult();
   const el = $("result");
   const mission = currentMission();
   const word = FACILITY_WORD[mission.facility_type];
@@ -1047,6 +1065,375 @@ function updateDriveLive(d) {
   $("dRoadLoad").textContent = `${pct(loading)} loading`;
 }
 
+/* =================== Fleet mode =================== */
+// Several vehicles dispatched at once. The backend splits them in flood zones
+// so no jam-sensitive road carries more vehicles at a time than its zone allows.
+const VEHICLE_COLORS = ["#2563eb", "#9333ea", "#0d9488", "#db2777", "#4338ca", "#0891b2", "#92400e", "#334155"];
+const MAX_FLEET = 8;
+const fleetLayer = L.layerGroup().addTo(map);
+let fleetPlanTimer = null;
+
+function fleetVehicles() {
+  return state.fleetPlan?.plans?.[state.fleetView] || [];
+}
+
+function setPlanMode(mode) {
+  const fleet = mode === "fleet";
+  if (fleet === state.fleetMode) return;
+  stopFleetPlay();
+  state.fleetMode = fleet;
+  document.body.classList.toggle("fleet-mode", fleet);
+  document.querySelectorAll(".mode-switch button").forEach((b) => b.setAttribute("aria-selected", b.dataset.mode === mode));
+  $("missionTitle").textContent = fleet ? "Mission for new vehicles" : "Mission";
+  if (fleet) {
+    routeLayer.clearLayers();
+    originMarker?.remove();
+    originMarker = null;
+    renderFleet();
+    scheduleFleet(true);
+  } else {
+    fleetLayer.clearLayers();
+    drawPlan();
+    renderStart();
+    renderResult();
+    restyleRoads();
+    renderFacilities();
+  }
+}
+
+function addVehicle(latlng) {
+  if (state.fleet.length >= MAX_FLEET) {
+    showToast("Fleet is full", `Up to ${MAX_FLEET} vehicles. Remove one to add another.`);
+    return;
+  }
+  const used = new Set(state.fleet.map((v) => v.id));
+  let n = 1;
+  while (used.has(`V${n}`)) n++;
+  state.fleet.push({ id: `V${n}`, mission: state.mission, origin: [latlng.lng, latlng.lat], color: VEHICLE_COLORS[(n - 1) % VEHICLE_COLORS.length] });
+  renderFleet();
+  scheduleFleet(true);
+}
+
+function scheduleFleet(immediate = false) {
+  if (!state.fleetMode || state.fleetPlay) return;
+  clearTimeout(fleetPlanTimer);
+  if (!state.fleet.length) {
+    state.fleetPlan = null;
+    renderFleet();
+    return;
+  }
+  fleetPlanTimer = setTimeout(dispatchFleet, immediate ? 0 : 150);
+}
+
+async function dispatchFleet() {
+  const seq = ++state.fleetSeq;
+  state.fleetPlanning = true;
+  state.fleetError = null;
+  renderFleetResult();
+  try {
+    const result = await post("/api/fleet/dispatch", {
+      vehicles: state.fleet.map((v) => ({ id: v.id, mission: v.mission, origin: v.origin })),
+      depart_tick: state.tick,
+    });
+    if (seq !== state.fleetSeq || !state.fleetMode) return;
+    state.fleetPlan = result;
+  } catch (e) {
+    if (seq !== state.fleetSeq) return;
+    state.fleetPlan = null;
+    state.fleetError = e.message;
+  }
+  state.fleetPlanning = false;
+  renderFleet();
+}
+
+function renderFleet() {
+  renderFleetList();
+  drawFleet();
+  renderFleetResult();
+  restyleRoads();
+  renderFacilities();
+}
+
+function renderFleetList() {
+  const list = $("fleetList");
+  $("fleetClear").hidden = !state.fleet.length;
+  if (!state.fleet.length) {
+    list.innerHTML = `<div class="fleet-empty">Click roads on the map to place vehicles (up to ${MAX_FLEET}). Each new vehicle uses the mission selected above. Place several close together to see how they get split up in flood zones.</div>`;
+    return;
+  }
+  const planned = new Map(fleetVehicles().map((v) => [v.id, v]));
+  list.innerHTML = `<ul class="fleet-list">${state.fleet
+    .map((v) => {
+      const p = planned.get(v.id);
+      const road = p ? p.origin.road_name || "Unnamed road" : state.fleetPlanning ? "Locating road…" : "Not planned yet";
+      return `<li><span class="vnum" style="background:${v.color}">${v.id.slice(1)}</span>
+        <span class="name">${esc(road)}<small>${v.id}</small></span>
+        <button class="mchip ${v.mission}" data-toggle="${v.id}" title="Switch mission">${v.mission === "medical" ? "Medical" : "Evacuation"}</button>
+        <button class="icon-x" data-remove="${v.id}" title="Remove ${v.id}" aria-label="Remove ${v.id}">${ICONS.close}</button></li>`;
+    })
+    .join("")}</ul>`;
+  list.querySelectorAll("[data-toggle]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const v = state.fleet.find((x) => x.id === b.dataset.toggle);
+      v.mission = v.mission === "medical" ? "evacuation" : "medical";
+      renderFleetList();
+      scheduleFleet(true);
+    })
+  );
+  list.querySelectorAll("[data-remove]").forEach((b) =>
+    b.addEventListener("click", () => {
+      state.fleet = state.fleet.filter((x) => x.id !== b.dataset.remove);
+      renderFleet();
+      scheduleFleet(true);
+    })
+  );
+}
+
+function drawFleet() {
+  fleetLayer.clearLayers();
+  if (!state.fleetMode) return;
+  const ll = (c) => [c[1], c[0]];
+  const pane = "routePane";
+  const planned = new Map(fleetVehicles().map((v) => [v.id, v]));
+  for (const v of state.fleet) {
+    const p = planned.get(v.id);
+    if (!p?.route) continue;
+    const lines = p.route.segments.map((s) => s.coords.map(ll));
+    L.polyline(lines, { pane, color: "#fff", weight: 9, interactive: false }).addTo(fleetLayer);
+    L.polyline(lines, { pane, color: v.color, weight: 5, opacity: 0.95, lineCap: "round" })
+      .bindTooltip(`<b>${v.id}</b> → ${p.destination.id} · ${fmtMin(p.route.minutes)} min`, { sticky: true })
+      .addTo(fleetLayer);
+  }
+  const report = state.fleetPlan?.report?.[state.fleetView];
+  for (const r of report?.roads || []) {
+    const pts = r.coords.map(ll);
+    L.polyline(pts, { pane, color: "#fff", weight: 11, interactive: false }).addTo(fleetLayer);
+    L.polyline(pts, { pane, color: "#111827", weight: 6, dashArray: "4 6", lineCap: "butt" })
+      .bindTooltip(
+        `<b>${esc(r.name || "Unnamed road")}</b><br>${r.vehicles.join(", ")} on it within ±${state.fleetPlan.rules.window_min} min` +
+          `<br>${r.zone === "red" ? "Red" : "Orange"} zone allows ${r.cap} at a time`,
+        { sticky: true }
+      )
+      .addTo(fleetLayer);
+  }
+  // During playback the moving markers replace the start pins.
+  for (const v of state.fleetPlay ? [] : state.fleet) {
+    const p = planned.get(v.id);
+    const at = p ? p.origin.snapped : v.origin;
+    L.marker([at[1], at[0]], {
+      icon: L.divIcon({ html: `<div class="fleet-pin" style="background:${v.color}">${v.id.slice(1)}</div>`, className: "", iconSize: [26, 26], iconAnchor: [13, 13] }),
+      zIndexOffset: 2000,
+      keyboard: false,
+    })
+      .bindTooltip(`${v.id} · ${v.mission === "medical" ? "ambulance" : "bus"}`, { direction: "top", offset: [0, -12] })
+      .addTo(fleetLayer);
+  }
+}
+
+function renderFleetResult() {
+  if (state.fleetPlay) return renderFleetPlayPanel();
+  const el = $("result");
+  const head = `<div class="result-head"><h2>Fleet routes</h2>${state.fleetPlanning ? '<span class="spinner"></span>' : ""}</div>`;
+  if (!state.fleet.length) {
+    el.innerHTML = `${head}<ol class="guide">
+      <li>Pick the mission for the next vehicle</li>
+      <li>Click several roads to place vehicles, ideally close together</li>
+      <li>Move the timeline to hour 5 or later. Vehicles heading through flood zones are split so no road carries more vehicles at a time than its zone allows.</li>
+    </ol>`;
+    return;
+  }
+  if (state.fleetError) {
+    el.innerHTML = head + alert("danger", esc(state.fleetError));
+    return;
+  }
+  const P = state.fleetPlan;
+  if (!P) {
+    el.innerHTML = `${head}<div class="skeleton"></div>`;
+    return;
+  }
+  const I = P.report.independent;
+  const C = P.report.coordinated;
+  const split = P.plans.coordinated.filter((v) => v.changed).length;
+  let verdict;
+  if (I.overloaded_roads === 0) verdict = `<span class="verdict clear">${ICONS.check}No jam risk: routes only share safe roads</span>`;
+  else if (C.overloaded_roads < I.overloaded_roads)
+    verdict = `<span class="verdict detour">${ICONS.detour}Split ${split} vehicle${split === 1 ? "" : "s"} to avoid ${I.overloaded_roads - C.overloaded_roads} jam road${I.overloaded_roads - C.overloaded_roads === 1 ? "" : "s"}</span>`;
+  else verdict = `<span class="verdict over">${ICONS.alert}Jam unavoidable on ${C.overloaded_roads} road${C.overloaded_roads === 1 ? "" : "s"}</span>`;
+
+  const better = (a, b) => (a < b ? "win" : "");
+  const row = (label, c, i, fmt) => `<tr><td>${label}</td><td class="us ${better(c, i)}">${fmt(c)}</td><td class="${better(i, c)}">${fmt(i)}</td></tr>`;
+  const minutes = (m) => (m == null ? "–" : `${m.toFixed(1)} min`);
+  const view = fleetVehicles();
+  const rules = P.rules;
+
+  el.innerHTML =
+    head +
+    `<div class="hero"><div class="hero-top">${verdict}
+      <table class="compare">
+        <tr><th></th><th>Coordinated</th><th>Uncoordinated</th></tr>
+        ${row("Jam-zone roads over cap", C.overloaded_roads, I.overloaded_roads, (x) => x)}
+        ${row("Length over cap", C.overloaded_m, I.overloaded_m, fmtDist)}
+        ${row("Estimated jam delay", C.estimated_jam_delay_min, I.estimated_jam_delay_min, minutes)}
+        ${row("Average drive", C.mean_minutes, I.mean_minutes, minutes)}
+        ${row("Slowest vehicle", C.max_minutes, I.max_minutes, minutes)}
+      </table></div>
+      <div class="hero-exp"><span class="muted" style="font-size:12px">Orange zone (High hazard, or ≥${pct(rules.orange_loading)} loading) allows ${rules.orange_cap} vehicles at a time; red (Very High, or ≥${pct(rules.red_loading)}) allows ${rules.red_cap}. "At a time" = within ±${rules.window_min} min. Medical vehicles are routed first.</span></div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-view="coordinated" aria-selected="${state.fleetView === "coordinated"}">Coordinated</button>
+      <button role="tab" data-view="independent" aria-selected="${state.fleetView === "independent"}">Uncoordinated</button>
+    </div>
+    <ul class="fleet-rows">${view
+      .map((v) => {
+        const color = state.fleet.find((x) => x.id === v.id)?.color;
+        const chip =
+          v.status !== "ok"
+            ? `<span class="chip cut_off">${v.status === "no_safe_route" ? "Over limit" : "No route"}</span>`
+            : state.fleetView === "coordinated" && v.changed
+              ? `<span class="chip split">Split${v.extra_minutes > 0.05 ? ` +${v.extra_minutes.toFixed(1)} min` : ""}</span>`
+              : "";
+        return `<li><span class="vnum" style="background:${color}">${v.id.slice(1)}</span>
+          ${v.destination ? `<span class="badge sm ${v.destination.type}">${v.destination.id}</span>` : ""}
+          <span class="name">${esc(v.destination ? shortName(v.destination.name) : "No destination")}</span>
+          ${chip}<span class="num">${v.route ? `${fmtMin(v.route.minutes)} min` : "–"}</span></li>`;
+      })
+      .join("")}</ul>
+    <div class="start-trip"><button class="primary" id="playFleet"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Play fleet</button></div>
+    ${speedPicker()}`;
+  el.querySelectorAll("[data-view]").forEach((b) =>
+    b.addEventListener("click", () => {
+      state.fleetView = b.dataset.view;
+      renderFleet();
+    })
+  );
+  $("playFleet").addEventListener("click", startFleetPlay);
+  bindSpeed(el);
+}
+
+/* Fleet playback: every vehicle drives its planned route at once. */
+function startFleetPlay() {
+  const vehicles = fleetVehicles().filter((v) => v.route);
+  if (!vehicles.length) return;
+  stopPlaying();
+  const startMin = state.tick * stepMin();
+  state.fleetPlay = {
+    view: state.fleetView,
+    startMin,
+    nowMin: startMin,
+    lastTs: null,
+    paused: false,
+    finished: false,
+    lastPanelTs: 0,
+    items: vehicles.map((v) => {
+      const color = state.fleet.find((x) => x.id === v.id)?.color || "#334155";
+      const segs = prepareRoute(v.route);
+      const marker = L.marker(segs[0].pts[0], {
+        icon: L.divIcon({ html: `<div class="fleet-pin" style="background:${color};width:30px;height:30px">${v.id.slice(1)}</div>`, className: "", iconSize: [30, 30], iconAnchor: [15, 15] }),
+        zIndexOffset: 3000,
+        interactive: false,
+        keyboard: false,
+      }).addTo(map);
+      return { v, color, segs, marker, done: false };
+    }),
+  };
+  document.body.classList.add("driving");
+  $("timeline").classList.add("locked");
+  drawFleet();
+  state.fleetPlay.timer = setInterval(fleetFrame, DRIVE_TICK_MS);
+  renderFleetPlayPanel();
+}
+
+function fleetFrame() {
+  const fp = state.fleetPlay;
+  if (!fp) return;
+  const ts = performance.now();
+  if (fp.lastTs != null && !fp.paused && !fp.finished) {
+    fp.nowMin += (Math.min((ts - fp.lastTs) / 1000, 0.5) * state.speed) / 60;
+  }
+  fp.lastTs = ts;
+  const elapsed = fp.nowMin - fp.startMin;
+  let all = true;
+  for (const it of fp.items) {
+    const pos = positionAt(it.segs, Math.min(elapsed, it.v.route.minutes));
+    if (pos) it.marker.setLatLng(pos.latlng);
+    it.done = elapsed >= it.v.route.minutes;
+    all &&= it.done;
+  }
+  $("clockTime").textContent = minuteTime(fp.nowMin);
+  $("clockHour").textContent = all ? "Fleet arrived" : "Fleet en route";
+  if (all && !fp.finished) {
+    fp.finished = true;
+    renderFleetPlayPanel();
+  } else if (ts - fp.lastPanelTs > 200) {
+    fp.lastPanelTs = ts;
+    updateFleetLive();
+  }
+}
+
+function renderFleetPlayPanel() {
+  const fp = state.fleetPlay;
+  if (!fp) return;
+  const live = fp.finished
+    ? `<span class="live arrived">All arrived</span>`
+    : fp.paused
+      ? `<span class="live paused">Paused</span>`
+      : `<span class="live">Fleet en route</span>`;
+  $("result").innerHTML = `
+    <div class="result-head"><h2>Fleet ${fp.view === "coordinated" ? "(coordinated)" : "(uncoordinated)"}</h2></div>
+    <div class="drive-card"><div class="drive-top">
+      <div class="drive-state">${live}<span class="drive-clock" id="fClock"></span></div>
+      <div class="eta"><b id="fDone">0</b><span class="unit">/ ${fp.items.length} arrived</span></div>
+      <div class="progress"><span id="fProg"></span></div>
+    </div></div>
+    <ul class="fleet-rows">${fp.items
+      .map(
+        (it) => `<li><span class="vnum" style="background:${it.color}">${it.v.id.slice(1)}</span>
+          <span class="badge sm ${it.v.destination.type}">${it.v.destination.id}</span>
+          <span class="name">${esc(shortName(it.v.destination.name))}</span>
+          <span class="num" id="f-${it.v.id}"></span></li>`
+      )
+      .join("")}</ul>
+    <div class="drive-controls">${
+      fp.finished
+        ? `<button class="primary" id="fStop" style="grid-column:1/-1">Done</button>`
+        : `<button class="secondary" id="fPause">${fp.paused ? "Resume" : "Pause"}</button><button class="secondary" id="fStop">Stop</button>`
+    }</div>
+    ${fp.finished ? "" : speedPicker()}`;
+  $("fPause")?.addEventListener("click", () => {
+    fp.paused = !fp.paused;
+    renderFleetPlayPanel();
+  });
+  $("fStop").addEventListener("click", stopFleetPlay);
+  bindSpeed($("result"));
+  updateFleetLive();
+}
+
+function updateFleetLive() {
+  const fp = state.fleetPlay;
+  if (!fp || !$("fClock")) return;
+  const elapsed = fp.nowMin - fp.startMin;
+  $("fClock").textContent = minuteTime(fp.nowMin);
+  $("fDone").textContent = fp.items.filter((it) => it.done).length;
+  const longest = Math.max(...fp.items.map((it) => it.v.route.minutes));
+  $("fProg").style.width = `${Math.min(100, (elapsed / longest) * 100)}%`;
+  for (const it of fp.items) {
+    const left = it.v.route.minutes - elapsed;
+    $(`f-${it.v.id}`).textContent = left <= 0 ? "Arrived" : `${left < 1 ? "<1" : Math.ceil(left)} min left`;
+  }
+}
+
+function stopFleetPlay() {
+  const fp = state.fleetPlay;
+  if (!fp) return;
+  clearInterval(fp.timer);
+  fp.items.forEach((it) => it.marker.remove());
+  state.fleetPlay = null;
+  document.body.classList.remove("driving");
+  $("timeline").classList.remove("locked");
+  renderTimeline();
+  renderFleet();
+}
+
 /* =================== Scenario & layers =================== */
 function showError(message) {
   $("error").hidden = !message;
@@ -1133,7 +1520,18 @@ async function init() {
   await goToTick(info.tick);
   $("loading").classList.add("hidden");
 
-  map.on("click", (ev) => (state.drive ? reportIncident(ev.latlng) : setOrigin(ev.latlng)));
+  map.on("click", (ev) => {
+    if (state.drive) reportIncident(ev.latlng);
+    else if (state.fleetPlay) return;
+    else if (state.fleetMode) addVehicle(ev.latlng);
+    else setOrigin(ev.latlng);
+  });
+  document.querySelectorAll(".mode-switch button").forEach((b) => b.addEventListener("click", () => setPlanMode(b.dataset.mode)));
+  $("fleetClear").addEventListener("click", () => {
+    state.fleet = [];
+    state.fleetPlan = null;
+    renderFleet();
+  });
   document.querySelectorAll("input[name=mode]").forEach((el) =>
     el.addEventListener("change", () => {
       setMode(el.value);

@@ -132,6 +132,42 @@ re-routes when **new information** arrives:
   tick. On short urban trips this rarely flips a route: a few minutes of extra
   rain adds little water.
 
+## Fleet dispatch: keeping vehicles from jamming in flood zones
+
+When many emergency sites are close together, routing every vehicle
+independently sends them down the same roads. On dry roads that is fine; in a
+flood zone a queue of vehicles slows everyone and one stalled vehicle can block
+the rest. `POST /api/fleet/dispatch` (`app/routing/fleet.py`) routes a whole
+fleet so that does not happen.
+
+| Zone | When (checked at each vehicle's arrival time) | Vehicles at a time |
+| --- | --- | --- |
+| Green | everything else | unlimited |
+| Orange | High hazard zone, or forecast loading ≥ 50% | 2 |
+| Red | Very High hazard zone, or loading ≥ 80% | 1 |
+
+* "At a time" means the vehicles' time on the road overlaps within ±2 min;
+  both directions of a street count as one road.
+* Vehicles are routed one by one, medical before evacuation. A later vehicle
+  pays `overflow_penalty` (3x per extra vehicle) for using a road already at
+  its zone cap, so it is split onto another route or another facility when a
+  reasonable one exists. Congestion never closes a road, so nobody is stranded.
+* Every response holds both `plans.coordinated` and `plans.independent`
+  (everyone routes alone) and a `report` for each: roads over cap, metres over
+  cap, an estimated jam delay (`jam_delay_factor`), average and slowest drive.
+* Rules are `CongestionRules` in `fleet.py` (`GET /api/fleet/rules`):
+  PLACEHOLDER values to tune.
+
+```http
+POST /api/fleet/dispatch
+{"vehicles": [{"mission": "medical", "origin": [80.212, 12.979]},
+              {"mission": "medical", "origin": [80.2112, 12.9783]}],
+ "depart_tick": 5}
+```
+
+In the map app, switch to **Fleet**, click roads to place up to 8 vehicles,
+compare the Coordinated / Uncoordinated tabs, and press **Play fleet**.
+
 ## API
 
 | Method | Path | Purpose |
@@ -157,6 +193,8 @@ re-routes when **new information** arrives:
 | GET | `/api/facilities?type=` | Hospitals and relief centres, with the roads touching each |
 | POST | `/api/route` | Flood-aware route and mid-trip replanning, see below |
 | GET | `/api/snap?lon=&lat=` | Nearest road to a point |
+| POST | `/api/fleet/dispatch` | Route several vehicles, splitting them in flood zones (see Fleet dispatch) |
+| GET | `/api/fleet/rules` | Congestion rules in use |
 
 ### Routing handoff: Flood & Risk Engineer (Member 2) → Routing Engineer (Member 3)
 

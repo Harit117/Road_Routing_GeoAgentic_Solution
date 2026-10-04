@@ -2,6 +2,7 @@
 with flood-aware A*, and compare against the plain fastest route."""
 
 from dataclasses import dataclass
+from typing import Callable
 
 from app.routing.astar import EdgeFn, SearchResult, Start, astar
 from app.routing.facilities import Facility
@@ -67,7 +68,11 @@ class Planner:
         origin_road_id: str | None = None,
         follow_road_ids: list[str] | None = None,
         blocked_road_ids: list[str] | None = None,
+        edge_wrapper: Callable[[EdgeFn], EdgeFn] | None = None,
     ) -> dict:
+        """`edge_wrapper` lets a caller add cost to roads (fleet congestion);
+        it must only ever increase costs, which keeps the A* heuristic valid."""
+        wrap = edge_wrapper or (lambda e: e)
         # Reported incidents (fallen tree, stalled vehicle...) close a road in
         # both directions, for every route including the plain fastest one.
         blocked: set[int] = set()
@@ -99,7 +104,7 @@ class Planner:
             raise PlanningError(f"no {mission.facility_type} facilities configured")
 
         starts, prefixes = self._starts(snap, forecast, mission)
-        edge = _without(blocked, mission_edge(mission, self.graph, forecast))
+        edge = wrap(_without(blocked, mission_edge(mission, self.graph, forecast)))
 
         options = []
         for fac in candidates:
@@ -118,7 +123,7 @@ class Planner:
             # Nothing stays under the limit. In an emergency "no route" is not
             # an answer: fall back to the least-flooded route, clearly flagged.
             status = "no_safe_route"
-            soft = _without(blocked, mission_edge(mission, self.graph, forecast, closures=False))
+            soft = wrap(_without(blocked, mission_edge(mission, self.graph, forecast, closures=False)))
             fallback = []
             for fac in candidates:
                 found = astar(self.graph, starts, fac.node_id, soft)

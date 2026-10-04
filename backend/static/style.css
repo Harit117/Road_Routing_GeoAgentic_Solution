@@ -343,7 +343,7 @@ details.fold[open] summary::after { transform: rotate(-135deg); margin-top: 3px;
 }
 
 /* =================== Drive mode =================== */
-body.driving .plan-only { display: none; }
+body.driving .plan-only, body.driving .mode-switch { display: none !important; }
 body.driving #map { cursor: grab; }
 .start-trip { display: flex; gap: 8px; align-items: stretch; }
 .start-trip button.primary { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 12px; font-size: 14px; }
@@ -417,6 +417,44 @@ body.driving #map { cursor: crosshair; }
 .toast b { display: block; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -8px); } }
 .timeline.locked #slider, .timeline.locked .icon-btn { opacity: .35; pointer-events: none; }
+
+/* =================== Fleet mode =================== */
+.mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: var(--sunken); border-radius: 10px; padding: 3px; }
+.mode-switch button {
+  border: 0; background: transparent; border-radius: 8px; padding: 8px; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--muted);
+}
+.mode-switch button[aria-selected="true"] { background: var(--panel); color: var(--text); box-shadow: var(--shadow-sm); }
+body:not(.fleet-mode) .fleet-only { display: none; }
+body.fleet-mode .single-only { display: none; }
+.fleet-head { display: flex; justify-content: space-between; align-items: baseline; }
+.fleet-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.fleet-list li { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; font-size: 13px; }
+.fleet-list li + li { border-top: 1px solid var(--border); }
+.fleet-list .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fleet-list .name small { display: block; color: var(--muted); font-size: 11.5px; }
+.vnum {
+  width: 24px; height: 24px; border-radius: 50%; color: #fff; font-weight: 700; font-size: 11px;
+  display: grid; place-items: center; flex-shrink: 0; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.12);
+}
+.mchip {
+  border: 1px solid var(--border); background: var(--panel); border-radius: 999px; padding: 2px 8px;
+  font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.mchip.medical { color: var(--hospital); border-color: #f3c3d0; background: var(--hospital-soft); }
+.mchip.evacuation { color: var(--relief); border-color: #b9e3e8; background: var(--relief-soft); }
+.fleet-empty { border: 1.5px dashed var(--border-strong); border-radius: 12px; padding: 12px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.fleet-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fleet-rows li { display: flex; align-items: center; gap: 10px; padding: 7px 2px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.fleet-rows li:last-child { border-bottom: 0; }
+.fleet-rows .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fleet-rows .num { font-variant-numeric: tabular-nums; color: var(--text-2); font-weight: 500; white-space: nowrap; }
+.chip.split { background: var(--accent-soft); color: var(--accent); }
+.compare .win { color: var(--ok-text); font-weight: 700; }
+.fleet-pin {
+  width: 26px; height: 26px; border-radius: 50%; color: #fff; font-weight: 800; font-size: 11.5px;
+  display: grid; place-items: center; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
 
 /* =================== Small screens =================== */
 @media (max-width: 760px) {
